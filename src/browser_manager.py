@@ -1,5 +1,6 @@
 """Browser instance management with nodriver."""
 
+import json
 import asyncio
 import os
 import sys
@@ -1072,6 +1073,57 @@ class BrowserManager:
                     instance.title = title
         await self.touch_instance(instance_id)
 
+    @staticmethod
+    async def _evaluate_json(tab: Any, expression: str) -> Any:
+        """
+        Evaluate an expression and return its value as plain Python data.
+
+        ``Tab.evaluate`` always sends CDP serialization options, so Chrome ignores
+        ``returnByValue`` and objects come back as deep-serialized property lists.
+        Stringifying inside the page and parsing here sidesteps that.
+
+        Args:
+            tab (Any): The nodriver tab.
+            expression (str): A JavaScript expression producing a JSON-serializable value.
+
+        Returns:
+            Any: The decoded value, or None if the page returned nothing.
+        """
+        raw = await tab.evaluate(f"JSON.stringify(({expression}))")
+        if raw is None or not isinstance(raw, str):
+            return None
+        return json.loads(raw)
+
+    @staticmethod
+    def _cookies_to_dicts(raw: Any) -> List[Dict[str, Any]]:
+        """
+        Normalize the result of ``Network.getCookies`` into plain dicts.
+
+        nodriver parses the CDP response into ``cdp.network.Cookie`` dataclasses
+        and returns them as a list. Older code expected the raw JSON dict with a
+        ``cookies`` key, so both shapes are accepted here.
+
+        Args:
+            raw (Any): A list of Cookie objects or dicts, or a dict with a
+                ``cookies`` key, or None.
+
+        Returns:
+            List[Dict[str, Any]]: Cookies as JSON-serializable dicts.
+        """
+        if raw is None:
+            return []
+        if isinstance(raw, dict):
+            raw = raw.get('cookies', [])
+        cookies: List[Dict[str, Any]] = []
+        for cookie in raw:
+            if isinstance(cookie, dict):
+                cookies.append(cookie)
+            elif hasattr(cookie, 'to_json'):
+                cookies.append(cookie.to_json())
+            else:
+                cookies.append(dict(vars(cookie)))
+        return cookies
+
     async def get_page_state(self, instance_id: str) -> Optional[PageState]:
         """
         Get complete page state for an instance.
@@ -1091,25 +1143,25 @@ class BrowserManager:
             title = await tab.evaluate("document.title")
             ready_state = await tab.evaluate("document.readyState")
 
-            cookies = await tab.send(uc.cdp.network.get_cookies())
+            cookies = self._cookies_to_dicts(await tab.send(uc.cdp.network.get_cookies()))
 
             local_storage = {}
             session_storage = {}
 
             try:
-                local_storage_keys = await tab.evaluate("Object.keys(localStorage)")
-                for key in local_storage_keys:
+                local_storage_keys = await self._evaluate_json(tab, "Object.keys(localStorage)")
+                for key in local_storage_keys or []:
                     value = await tab.evaluate(f"localStorage.getItem('{key}')")
                     local_storage[key] = value
 
-                session_storage_keys = await tab.evaluate("Object.keys(sessionStorage)")
-                for key in session_storage_keys:
+                session_storage_keys = await self._evaluate_json(tab, "Object.keys(sessionStorage)")
+                for key in session_storage_keys or []:
                     value = await tab.evaluate(f"sessionStorage.getItem('{key}')")
                     session_storage[key] = value
             except Exception:
                 pass
 
-            viewport = await tab.evaluate("""
+            viewport = await self._evaluate_json(tab, """
                 ({
                     width: window.innerWidth,
                     height: window.innerHeight,
@@ -1122,10 +1174,10 @@ class BrowserManager:
                 url=url,
                 title=title,
                 ready_state=ready_state,
-                cookies=cookies.get('cookies', []),
+                cookies=cookies,
                 local_storage=local_storage,
                 session_storage=session_storage,
-                viewport=viewport
+                viewport=viewport or {}
             )
 
         except Exception as e:
