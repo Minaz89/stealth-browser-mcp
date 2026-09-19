@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and adheres to Semantic Versioning where practical.
 
+## [Unreleased]
+### Fixed
+- **`get_instance_state()` always failed** with `'list' object has no attribute 'get'`. nodriver returns `Network.getCookies` results as a list of `Cookie` dataclasses, but `get_page_state` treated the value as the raw JSON dict. Cookies are now normalized to plain dicts and both shapes are accepted. The `viewport` and storage-key reads also came back deep-serialized instead of as plain values; they are now read through `JSON.stringify` in the page, and storage access errors on opaque origins no longer abort the call.
+
 ## [0.2.5] - 2026-02-10
 ### Fixed
 - **MCP JSON-RPC Protocol Corruption** - All debug `print()` calls redirected from stdout to stderr, fixing tool hangs after `spawn_browser` and `navigate` (#8)
