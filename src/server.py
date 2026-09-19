@@ -517,6 +517,45 @@ async def paste_text(
     return await dom_handler.paste_text(tab, selector, text, clear_first)
 
 @section_tool("element-interaction")
+async def press_key(
+    instance_id: str,
+    key: str,
+    modifiers: Optional[List[str]] = None,
+    selector: Optional[str] = None,
+    count: int = 1,
+    delay_ms: int = 50
+) -> Dict[str, Any]:
+    """
+    Press a real key using trusted CDP key events.
+
+    Sends Input.dispatchKeyEvent keyDown/keyUp pairs, so the page sees trusted
+    events. Use this instead of type_text(parse_newlines=True) for React-select,
+    typeahead and combobox widgets, which discard values set by synthetic
+    JavaScript KeyboardEvents.
+
+    Args:
+        instance_id (str): Browser instance ID.
+        key (str): DOM KeyboardEvent.key name (Enter, Tab, Escape, ArrowDown, ArrowUp, ArrowLeft, ArrowRight, Backspace, Delete, Home, End, PageUp, PageDown, Space, F1-F12) or a single printable character.
+        modifiers (Optional[List[str]]): Modifier keys to hold: Shift, Control (Ctrl), Alt, Meta (Cmd).
+        selector (Optional[str]): CSS selector to focus before pressing. Presses on the focused element when omitted.
+        count (int): Number of times to press the key.
+        delay_ms (int): Delay between presses in milliseconds.
+
+    Returns:
+        Dict[str, Any]: { success: True, key: str, count: int, modifiers: [str, ...] }
+    """
+    if isinstance(count, str):
+        count = int(count)
+    if isinstance(delay_ms, str):
+        delay_ms = int(delay_ms)
+    if isinstance(modifiers, str):
+        modifiers = [modifiers]
+    tab = await browser_manager.get_tab(instance_id)
+    if not tab:
+        raise Exception(f"Instance not found: {instance_id}")
+    return await dom_handler.press_key(tab, key, modifiers, selector, count, delay_ms)
+
+@section_tool("element-interaction")
 async def file_upload(
     instance_id: str,
     selector: str,
