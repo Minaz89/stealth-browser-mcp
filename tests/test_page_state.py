@@ -49,8 +49,8 @@ class FakeTab:
             "window.location.href": "https://example.com/",
             "document.title": "Example Domain",
             "document.readyState": "complete",
-            "Object.keys(localStorage)": [],
-            "Object.keys(sessionStorage)": [],
+            "Object.keys(localStorage)": ["owner's key"],
+            "Object.keys(sessionStorage)": ["session's key"],
         }
 
     async def send(self, command):
@@ -71,8 +71,21 @@ class FakeTab:
                 inner = inner[1:-1].strip()
             if inner.startswith("{"):
                 return json.dumps({"width": 1920, "height": 1080, "devicePixelRatio": 1})
+            if inner.startswith("localStorage.getItem("):
+                key = json.loads(inner[len("localStorage.getItem("):-1])
+                return json.dumps({"owner's key": "local value"}.get(key))
+            if inner.startswith("sessionStorage.getItem("):
+                key = json.loads(inner[len("sessionStorage.getItem("):-1])
+                return json.dumps({"session's key": "session value"}.get(key))
             return json.dumps(self.evaluations.get(inner))
+        if expression.startswith("localStorage.getItem("):
+            key = json.loads(expression[len("localStorage.getItem("):-1])
+            return {"owner's key": "local value"}.get(key)
+        if expression.startswith("sessionStorage.getItem("):
+            key = json.loads(expression[len("sessionStorage.getItem("):-1])
+            return {"session's key": "session value"}.get(key)
         return self.evaluations.get(expression)
+
 
 
 def _manager_with_tab(tab):
@@ -121,6 +134,8 @@ class GetPageStateTests(unittest.TestCase):
         self.assertEqual(state.ready_state, "complete")
         self.assertEqual(state.cookies[0]["name"], "session")
         self.assertEqual(state.viewport["width"], 1920)
+        self.assertEqual(state.local_storage, {"owner's key": "local value"})
+        self.assertEqual(state.session_storage, {"session's key": "session value"})
 
     def test_page_state_with_legacy_dict_shape(self):
         manager = _manager_with_tab(FakeTab({"cookies": [SAMPLE_COOKIE_JSON]}))

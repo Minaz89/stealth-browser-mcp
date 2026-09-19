@@ -1151,12 +1151,16 @@ class BrowserManager:
             try:
                 local_storage_keys = await self._evaluate_json(tab, "Object.keys(localStorage)")
                 for key in local_storage_keys or []:
-                    value = await tab.evaluate(f"localStorage.getItem('{key}')")
+                    value = await tab.evaluate(
+                        f"localStorage.getItem({json.dumps(key)})"
+                    )
                     local_storage[key] = value
 
                 session_storage_keys = await self._evaluate_json(tab, "Object.keys(sessionStorage)")
                 for key in session_storage_keys or []:
-                    value = await tab.evaluate(f"sessionStorage.getItem('{key}')")
+                    value = await tab.evaluate(
+                        f"sessionStorage.getItem({json.dumps(key)})"
+                    )
                     session_storage[key] = value
             except Exception:
                 pass
