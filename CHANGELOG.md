@@ -5,8 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog and adheres to Semantic Versioning where practical.
 
 ## [Unreleased]
-### Fixed
-- **`get_instance_state()` always failed** with `'list' object has no attribute 'get'`. nodriver returns `Network.getCookies` results as a list of `Cookie` dataclasses, but `get_page_state` treated the value as the raw JSON dict. Cookies are now normalized to plain dicts and both shapes are accepted. The `viewport` and storage-key reads also came back deep-serialized instead of as plain values; they are now read through `JSON.stringify` in the page, and storage access errors on opaque origins no longer abort the call.
+### Added
+- **`press_key()` tool** - Presses real keys through CDP `Input.dispatchKeyEvent`, producing trusted `keydown`/`keypress`/`keyup` events. Supports named keys (Enter, Tab, Escape, arrows, Backspace, Delete, Home, End, PageUp, PageDown, Space, F1-F12), single printable characters, modifier combinations (Shift, Control/Ctrl, Alt, Meta/Cmd), optional focus selector, repeat count, and inter-press delay.
+- **Tests** - `tests/test_press_key.py` covers the key-to-CDP mapping, the modifier bitmask, and the dispatch sequence. A browser-backed test asserting `isTrusted` runs when `STEALTH_BROWSER_TESTS=1` is set.
+
+### Changed
+- `element-interaction` section now exposes 13 tools; full surface is 98 tools, minimal surface is 21.
+
+### Notes
+- `type_text(parse_newlines=True)` fakes Enter by writing `\n` into the input value and dispatching an untrusted JavaScript `KeyboardEvent`. React-select and typeahead widgets (Greenhouse, Ashby, Lever, Workday) ignore untrusted events and drop the value on blur. Use `press_key()` for those fields.
 
 ## [0.2.5] - 2026-02-10
 ### Fixed
