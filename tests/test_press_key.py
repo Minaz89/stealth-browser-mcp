@@ -177,12 +177,33 @@ class PressKeyDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tab.events[0]["modifiers"], 8)
         self.assertEqual(tab.events[1]["modifiers"], 8)
 
+    async def test_shifted_printable_key_has_shifted_text(self):
+        tab = RecordingTab()
+        await DOMHandler.press_key(tab, "a", modifiers=["Shift"])
+
+        key_down = tab.events[0]
+        self.assertEqual(key_down["key"], "A")
+        self.assertEqual(key_down["text"], "A")
+        self.assertEqual(key_down["unmodifiedText"], "a")
+
     async def test_non_shift_modifier_suppresses_text(self):
         tab = RecordingTab()
         await DOMHandler.press_key(tab, "a", modifiers=["Ctrl"])
 
         self.assertEqual(tab.events[0]["modifiers"], 2)
         self.assertNotIn("text", tab.events[0])
+        self.assertNotIn("unmodifiedText", tab.events[0])
+
+    async def test_unsupported_unicode_character_is_rejected(self):
+        tab = RecordingTab()
+        with self.assertRaises(Exception):
+            await DOMHandler.press_key(tab, "é")
+        self.assertEqual(tab.events, [])
+
+    async def test_native_virtual_key_code_is_omitted(self):
+        tab = RecordingTab()
+        await DOMHandler.press_key(tab, "a")
+        self.assertNotIn("nativeVirtualKeyCode", tab.events[0])
 
     async def test_invalid_count_is_rejected(self):
         tab = RecordingTab()

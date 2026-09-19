@@ -80,40 +80,31 @@ def supported_key_names() -> List[str]:
 
 
 def resolve_key_descriptor(key: str) -> Dict[str, Any]:
-    """
-    Map a DOM KeyboardEvent.key name or single printable character to CDP key fields.
-
-    Args:
-        key (str): Named key (Enter, ArrowDown, F5, ...) or a single printable character.
-
-    Returns:
-        Dict[str, Any]: { key, code, virtual_key_code, text } for Input.dispatchKeyEvent.
-    """
+    """Map a named key or supported ASCII printable character to CDP fields."""
     if not isinstance(key, str) or key == "":
         raise Exception(
-            "Invalid key: key must be a non-empty string. "
-            f"Supported named keys: {', '.join(supported_key_names())}. "
-            "Any single printable character is also accepted."
+            "Invalid key. Use a supported named key or one ASCII printable character."
         )
 
     if len(key) == 1 and key != " ":
         code, virtual_key_code = PRINTABLE_KEY_CODES.get(key, ("", 0))
-        if not code:
-            if key.isalpha() and key.upper() in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-                code = f"Key{key.upper()}"
-                virtual_key_code = ord(key.upper())
-            elif key.isdigit():
-                code = f"Digit{key}"
-                virtual_key_code = ord(key)
+        if not code and "a" <= key.lower() <= "z":
+            code = f"Key{key.upper()}"
+            virtual_key_code = ord(key.upper())
+        elif not code and "0" <= key <= "9":
+            code = f"Digit{key}"
+            virtual_key_code = ord(key)
+        if not code or not key.isascii() or not key.isprintable():
+            raise Exception(
+                f"Unsupported key {key!r}. Use a supported named key or one ASCII printable character."
+            )
         return {"key": key, "code": code, "virtual_key_code": virtual_key_code, "text": key}
 
     lookup = "space" if key == " " else key.strip().lower()
     named = NAMED_KEYS.get(lookup)
     if named is None:
         raise Exception(
-            f"Unsupported key: {key!r}. "
-            f"Supported named keys: {', '.join(supported_key_names())}. "
-            "Any single printable character is also accepted."
+            f"Unsupported key {key!r}. Supported named keys: {', '.join(supported_key_names())}."
         )
 
     dom_key, code, virtual_key_code, text = named
@@ -543,27 +534,32 @@ class DOMHandler:
                 await asyncio.sleep(0.1)
 
             text = descriptor["text"]
+            unmodified_text = text
+            if modifier_mask & MODIFIER_SHIFT and text is not None:
+                text = text.upper() if text.isascii() else text
+                key = descriptor["key"].upper() if len(descriptor["key"]) == 1 else descriptor["key"]
+            else:
+                key = descriptor["key"]
             if modifier_mask & ~MODIFIER_SHIFT:
                 text = None
+                unmodified_text = None
 
             for index in range(count):
                 await tab.send(cdp.input_.dispatch_key_event(
                     "keyDown",
                     modifiers=modifier_mask,
-                    key=descriptor["key"],
+                    key=key,
                     code=descriptor["code"],
                     windows_virtual_key_code=descriptor["virtual_key_code"],
-                    native_virtual_key_code=descriptor["virtual_key_code"],
                     text=text,
-                    unmodified_text=text
+                    unmodified_text=unmodified_text
                 ))
                 await tab.send(cdp.input_.dispatch_key_event(
                     "keyUp",
                     modifiers=modifier_mask,
-                    key=descriptor["key"],
+                    key=key,
                     code=descriptor["code"],
-                    windows_virtual_key_code=descriptor["virtual_key_code"],
-                    native_virtual_key_code=descriptor["virtual_key_code"]
+                    windows_virtual_key_code=descriptor["virtual_key_code"]
                 ))
                 if index < count - 1:
                     await asyncio.sleep(delay_ms / 1000)
