@@ -63,6 +63,29 @@ class ProcessCleanup:
         return parsed
 
     @staticmethod
+    def _is_pid_running(pid: Optional[int]) -> bool:
+        """
+        Check whether a process id belongs to a process that is still running.
+
+        Args:
+            pid (Optional[int]): Process id to probe.
+
+        Returns:
+            bool: True when the process exists.
+        """
+        if not isinstance(pid, int) or pid <= 0:
+            return False
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+        return True
+
+    @staticmethod
     def _normalize_path(path: Optional[str]) -> Optional[str]:
         """
         Normalize a filesystem path for safe comparison.
@@ -137,6 +160,7 @@ class ProcessCleanup:
                     "user_data_dir": None,
                     "uses_custom_data_dir": None,
                     "timestamp": 0,
+                    "owner_pid": None,
                 }
             elif isinstance(raw_value, dict):
                 pid = raw_value.get("pid")
@@ -147,6 +171,7 @@ class ProcessCleanup:
                     "user_data_dir": raw_value.get("user_data_dir"),
                     "uses_custom_data_dir": raw_value.get("uses_custom_data_dir"),
                     "timestamp": raw_value.get("timestamp", 0),
+                    "owner_pid": raw_value.get("owner_pid"),
                 }
             else:
                 continue
@@ -213,16 +238,37 @@ class ProcessCleanup:
             )
             return {}
 
-    def _save_tracked_pids(self):
+    def _foreign_live_entries(self) -> Dict[str, Dict[str, Any]]:
         """
-        Persist tracked browser metadata to disk.
+        Read the PID file and keep only entries owned by another running server.
+
+        Returns:
+            Dict[str, Dict[str, Any]]: Entries this process must not disturb.
+        """
+        own_pid = os.getpid()
+        entries: Dict[str, Dict[str, Any]] = {}
+        for instance_id, metadata in self._load_tracked_pids().items():
+            owner_pid = metadata.get("owner_pid")
+            if owner_pid != own_pid and self._is_pid_running(owner_pid):
+                entries[instance_id] = metadata
+        return entries
+
+    def _write_pid_file(self, entries: Dict[str, Dict[str, Any]]):
+        """
+        Write the PID file, removing it when there is nothing left to record.
+
+        Args:
+            entries (Dict[str, Dict[str, Any]]): Metadata to persist.
 
         Returns:
             None
         """
+        if not entries:
+            self._clear_pid_file()
+            return
         try:
             data = {
-                "browser_processes": self.browser_processes,
+                "browser_processes": entries,
                 "timestamp": time.time(),
             }
             with open(self.pid_file, "w") as file_handle:
@@ -233,6 +279,17 @@ class ProcessCleanup:
                 "save_pids",
                 f"Failed to save PID file: {error}",
             )
+
+    def _save_tracked_pids(self):
+        """
+        Persist tracked browser metadata, preserving other live servers' entries.
+
+        Returns:
+            None
+        """
+        entries = self._foreign_live_entries()
+        entries.update(self.browser_processes)
+        self._write_pid_file(entries)
 
     def _get_active_browser_profile_dirs(self) -> Set[str]:
         """
@@ -483,9 +540,15 @@ class ProcessCleanup:
             None
         """
         saved_processes = self._load_tracked_pids()
+        own_pid = os.getpid()
+        retained: Dict[str, Dict[str, Any]] = {}
         recovered_count = 0
 
         for instance_id, metadata in saved_processes.items():
+            owner_pid = metadata.get("owner_pid")
+            if owner_pid != own_pid and self._is_pid_running(owner_pid):
+                retained[instance_id] = metadata
+                continue
             try:
                 if self._kill_processes_for_metadata(instance_id, metadata):
                     recovered_count += 1
@@ -504,7 +567,14 @@ class ProcessCleanup:
                 f"Killed {recovered_count} orphaned browser processes",
             )
 
-        self._clear_pid_file()
+        if retained:
+            debug_logger.log_info(
+                "process_cleanup",
+                "recovery",
+                f"Left {len(retained)} browser processes owned by other running servers",
+            )
+
+        self._write_pid_file(retained)
         self._sweep_orphaned_temp_profiles()
 
     def track_browser_process(
@@ -541,6 +611,7 @@ class ProcessCleanup:
                 "user_data_dir": self._normalize_path(user_data_dir),
                 "uses_custom_data_dir": uses_custom_data_dir,
                 "timestamp": time.time(),
+                "owner_pid": os.getpid(),
             }
             self.browser_processes[instance_id] = metadata
             self.tracked_pids.add(pid)
@@ -581,10 +652,7 @@ class ProcessCleanup:
                 self.tracked_pids.discard(pid)
             del self.browser_processes[instance_id]
 
-            if self.browser_processes:
-                self._save_tracked_pids()
-            else:
-                self._clear_pid_file()
+            self._save_tracked_pids()
 
             debug_logger.log_info(
                 "process_cleanup",
@@ -843,10 +911,7 @@ class ProcessCleanup:
             f"Cleaned up {cleaned_count} tracked browser process entries",
         )
 
-        if self.browser_processes:
-            self._save_tracked_pids()
-        else:
-            self._clear_pid_file()
+        self._save_tracked_pids()
 
     def _clear_pid_file(self):
         """
