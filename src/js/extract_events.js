@@ -16,7 +16,7 @@
  *   }
  */
 (function() {
-    const selector = "$SELECTOR$";
+    const selector = $SELECTOR$;
     const options = $OPTIONS$;
     const element = document.querySelector(selector);
     if (!element) return {error: 'Element not found'};

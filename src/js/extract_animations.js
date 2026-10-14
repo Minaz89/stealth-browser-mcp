@@ -8,7 +8,7 @@
  * @returns {object} - Extracted animation and transition data, or error if not found.
  */
 (function() {
-    const selector = "$SELECTOR$";
+    const selector = $SELECTOR$;
     const options = $OPTIONS$;
     const element = document.querySelector(selector);
     if (!element) return { error: 'Element not found' };

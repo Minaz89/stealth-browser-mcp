@@ -37,7 +37,7 @@ class EnvironmentBearerTokenVerifier(TokenVerifier):
         Returns:
             Optional[AccessToken]: Access token metadata when valid, otherwise None.
         """
-        if not hmac.compare_digest(token, self._token):
+        if not hmac.compare_digest(token.encode("utf-8"), self._token.encode("utf-8")):
             return None
         return AccessToken(
             token=token,

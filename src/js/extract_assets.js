@@ -11,10 +11,10 @@
         audio: []
     };
     
-    const includeImages = $INCLUDE_IMAGES;
-    const includeBackgrounds = $INCLUDE_BACKGROUNDS;
-    const includeFonts = $INCLUDE_FONTS;
-    const fetchExternal = $FETCH_EXTERNAL;
+    const includeImages = $INCLUDE_IMAGES$;
+    const includeBackgrounds = $INCLUDE_BACKGROUNDS$;
+    const includeFonts = $INCLUDE_FONTS$;
+    const fetchExternal = $FETCH_EXTERNAL$;
     
     // Extract images
     if (includeImages) {
@@ -94,9 +94,9 @@
     });
     
     return result;
-})('$SELECTOR', {
-    include_images: $INCLUDE_IMAGES,
-    include_backgrounds: $INCLUDE_BACKGROUNDS, 
-    include_fonts: $INCLUDE_FONTS,
-    fetch_external: $FETCH_EXTERNAL
+})($SELECTOR$, {
+    include_images: $INCLUDE_IMAGES$,
+    include_backgrounds: $INCLUDE_BACKGROUNDS$, 
+    include_fonts: $INCLUDE_FONTS$,
+    fetch_external: $FETCH_EXTERNAL$
 });

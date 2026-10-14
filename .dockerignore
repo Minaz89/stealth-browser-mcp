@@ -58,3 +58,7 @@ media/
 # Development scripts
 run_server.sh
 run_server.bat
+
+# Local clone data and scratch directories
+.element_clones/
+.tmp/

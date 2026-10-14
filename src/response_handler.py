@@ -1,10 +1,14 @@
 """Response handler for managing large responses and automatic file-based fallbacks."""
 
 import json
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+UNSAFE_FILENAME_CHARS = re.compile(r"[^\w.-]+")
+MAX_PREFIX_LENGTH = 80
 
 
 class ResponseHandler:
@@ -37,7 +41,7 @@ class ResponseHandler:
         """
         if isinstance(data, (dict, list)):
             # Convert to JSON string and estimate ~4 chars per token
-            json_str = json.dumps(data, ensure_ascii=False)
+            json_str = json.dumps(data, ensure_ascii=False, default=str)
             return len(json_str) // 4
         elif isinstance(data, str):
             return len(data) // 4
@@ -48,7 +52,7 @@ class ResponseHandler:
         self, 
         data: Any, 
         fallback_filename_prefix: str = "large_response",
-        metadata: Dict[str, Any] = None
+        metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Handle response data, automatically falling back to file storage if too large.
@@ -70,7 +74,8 @@ class ResponseHandler:
         # Data is too large, save to file
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         unique_id = str(uuid.uuid4())[:8]
-        filename = f"{fallback_filename_prefix}_{timestamp}_{unique_id}.json"
+        safe_prefix = UNSAFE_FILENAME_CHARS.sub("_", fallback_filename_prefix).strip("._")[:MAX_PREFIX_LENGTH]
+        filename = f"{safe_prefix or 'large_response'}_{timestamp}_{unique_id}.json"
         file_path = self.clone_dir / filename
         
         # Prepare file content with metadata
@@ -86,7 +91,7 @@ class ResponseHandler:
         
         # Save to file
         with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(file_content, f, indent=2, ensure_ascii=False)
+            json.dump(file_content, f, indent=2, ensure_ascii=False, default=str)
         
         # Return file info instead of data
         file_size_kb = file_path.stat().st_size / 1024

@@ -3,15 +3,25 @@
 import asyncio
 import base64
 import json
+from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Coroutine, Dict, List, Optional, Set
 
 import nodriver as uc
 from nodriver import Tab
 
+import cdp_raw
 from debug_logger import debug_logger
 from models import NetworkRequest, NetworkResponse
+
+MAX_REQUESTS_PER_INSTANCE = 1000
+MAX_CAPTURED_BODY_BYTES = 2 * 1024 * 1024
+MAX_STORED_BODY_BYTES = 64 * 1024 * 1024
+TEXT_RESOURCE_TYPES = {"document", "xhr", "fetch", "script", "eventsource"}
+BINARY_RESOURCE_TYPES = {"image", "media", "font", "websocket", "manifest"}
+INTERNAL_URL_PREFIXES = ("chrome://", "chrome-untrusted://", "chrome-extension://", "devtools://")
+TEXT_MIME_MARKERS = ("json", "text/", "javascript", "xml", "x-www-form-urlencoded", "graphql")
 
 
 class NetworkInterceptor:
@@ -22,19 +32,32 @@ class NetworkInterceptor:
         self._responses: Dict[str, NetworkResponse] = {}
         self._instance_requests: Dict[str, List[str]] = {}
         self._instance_filters: Dict[str, Dict[str, List[str]]] = {}
+        self._tasks: Set[asyncio.Task] = set()
+        self._body_bytes: Dict[str, int] = {}
+        self._body_order: Dict[str, "OrderedDict[str, None]"] = {}
         self._lock = asyncio.Lock()
 
-    async def setup_interception(self, tab: Tab, instance_id: str, block_resources: List[str] = None):
+    def _spawn(self, coro: Coroutine[Any, Any, Any]) -> None:
+        """
+        Run an event handler coroutine and keep a reference until it finishes.
+
+        coro: Coroutine - Handler coroutine to schedule.
+        """
+        task = asyncio.create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def setup_interception(self, tab: Tab, instance_id: str, block_resources: Optional[List[str]] = None):
         """
         Set up network interception for a tab.
 
         tab: Tab - The browser tab to intercept.
         instance_id: str - The browser instance identifier.
-        block_resources: List[str] - List of resource types or URL patterns to block.
+        block_resources: Optional[List[str]] - List of resource types or URL patterns to block.
         """
         try:
             await tab.send(uc.cdp.network.enable())
-            
+
             if block_resources:
                 # Convert resource types to URL patterns for blocking
                 url_patterns = []
@@ -47,7 +70,7 @@ class NetworkInterceptor:
                         'script': ['*.js', '*.mjs'],
                         'media': ['*.mp4', '*.mp3', '*.wav', '*.avi', '*.webm']
                     }
-                    
+
                     if resource_type.lower() in resource_patterns:
                         url_patterns.extend(resource_patterns[resource_type.lower()])
                         debug_logger.log_info(
@@ -65,7 +88,7 @@ class NetworkInterceptor:
                             "Added custom URL pattern",
                             resource_type,
                         )
-                
+
                 # Use network.set_blocked_ur_ls to block the URL patterns
                 if url_patterns:
                     await tab.send(uc.cdp.network.set_blocked_ur_ls(urls=url_patterns))
@@ -75,16 +98,20 @@ class NetworkInterceptor:
                         f"Blocked {len(url_patterns)} URL patterns",
                         url_patterns,
                     )
-            
+
             tab.add_handler(
                 uc.cdp.network.RequestWillBeSent,
-                lambda event: asyncio.create_task(self._on_request(event, instance_id)),
+                lambda event: self._spawn(self._on_request(event, instance_id)),
             )
             tab.add_handler(
                 uc.cdp.network.ResponseReceived,
-                lambda event: asyncio.create_task(self._on_response(event, instance_id, tab)),
+                lambda event: self._spawn(self._on_response(event)),
             )
-            
+            tab.add_handler(
+                uc.cdp.network.LoadingFinished,
+                lambda event: self._spawn(self._on_loading_finished(event, tab)),
+            )
+
             async with self._lock:
                 if instance_id not in self._instance_requests:
                     self._instance_requests[instance_id] = []
@@ -102,7 +129,9 @@ class NetworkInterceptor:
         try:
             request_id = event.request_id
             request = event.request
-            resource_type = event.type.value if hasattr(event, "type") else None
+            if request.url.startswith(INTERNAL_URL_PREFIXES):
+                return
+            resource_type = event.type_.value if getattr(event, "type_", None) else None
 
             async with self._lock:
                 filters = self._instance_filters.get(instance_id, {})
@@ -133,48 +162,116 @@ class NetworkInterceptor:
                 resource_type=resource_type,
             )
             async with self._lock:
+                request_ids = self._instance_requests.setdefault(instance_id, [])
                 self._requests[request_id] = network_request
-                self._instance_requests[instance_id].append(request_id)
-        except Exception:
-            pass
+                if request_id not in request_ids:
+                    request_ids.append(request_id)
+                while len(request_ids) > MAX_REQUESTS_PER_INSTANCE:
+                    evicted = request_ids.pop(0)
+                    self._drop_body(evicted)
+                    self._requests.pop(evicted, None)
+                    self._responses.pop(evicted, None)
+        except Exception as e:
+            debug_logger.log_warning("network_interceptor", "on_request", f"Failed to record request: {e}")
 
-    async def _on_response(self, event, instance_id: str, tab: Tab = None):
+    async def _on_response(self, event):
         """
-        Handle response event.
+        Record response metadata for a captured request.
 
-        event: Any - The event object containing response data.
-        instance_id: str - The browser instance identifier.
-        tab: Tab - The browser tab (optional, for body capture).
+        event: Any - The ResponseReceived event.
         """
         try:
             request_id = event.request_id
             response = event.response
-
-            body = None
-            if tab:
-                try:
-                    result = await tab.send(uc.cdp.network.get_response_body(request_id=request_id))
-                    if result:
-                        body_str, base64_encoded = result
-                        if base64_encoded:
-                            body = base64.b64decode(body_str)
-                        else:
-                            body = body_str.encode("utf-8")
-                except Exception:
-                    pass
-
             network_response = NetworkResponse(
                 request_id=request_id,
                 status=response.status,
-                headers=dict(response.headers) if hasattr(response, "headers") else {},
-                content_type=response.mime_type if hasattr(response, "mime_type") else None,
-                body=body,
+                headers=dict(response.headers) if response.headers else {},
+                content_type=response.mime_type,
             )
             async with self._lock:
-                self._responses[request_id] = network_response
-        except Exception:
-            pass
+                if request_id in self._requests:
+                    self._responses[request_id] = network_response
+        except Exception as e:
+            debug_logger.log_warning("network_interceptor", "on_response", f"Failed to record response: {e}")
 
+    @staticmethod
+    def _should_capture_body(request: Optional[NetworkRequest], response: NetworkResponse) -> bool:
+        """
+        Decide whether a response body is worth storing eagerly.
+
+        Text-like responses (documents, XHR, fetch, scripts, and JSON, text, or
+        XML mime types) are stored. Images, media, fonts, and other binary
+        payloads are left in the browser and can be fetched on demand.
+
+        Args:
+            request (Optional[NetworkRequest]): Captured request, if known.
+            response (NetworkResponse): Captured response metadata.
+
+        Returns:
+            bool: True when the body should be stored.
+        """
+        resource_type = ((request.resource_type if request else None) or "").lower()
+        if resource_type in BINARY_RESOURCE_TYPES:
+            return False
+        if resource_type in TEXT_RESOURCE_TYPES:
+            return True
+        content_type = (response.content_type or "").lower()
+        return any(marker in content_type for marker in TEXT_MIME_MARKERS)
+
+    def _drop_body(self, request_id: str) -> None:
+        """
+        Forget a stored body and its size accounting. Call with the lock held.
+
+        Args:
+            request_id (str): Request whose body is dropped.
+        """
+        response = self._responses.get(request_id)
+        request = self._requests.get(request_id)
+        if response is None or response.body is None:
+            return
+        if request is not None:
+            instance_id = request.instance_id
+            self._body_bytes[instance_id] = max(0, self._body_bytes.get(instance_id, 0) - len(response.body))
+            self._body_order.get(instance_id, {}).pop(request_id, None)
+        response.body = None
+
+    async def _on_loading_finished(self, event, tab: Tab):
+        """
+        Store a text-like response body once the resource has finished loading.
+
+        Bodies above MAX_CAPTURED_BODY_BYTES are skipped, and each instance
+        keeps at most MAX_STORED_BODY_BYTES of bodies, dropping the oldest
+        first. Skipped bodies can still be fetched with get_response_body
+        while the page holds them.
+
+        event: Any - The LoadingFinished event.
+        tab: Tab - The browser tab that loaded the resource.
+        """
+        request_id = event.request_id
+        if (event.encoded_data_length or 0) > MAX_CAPTURED_BODY_BYTES:
+            return
+        async with self._lock:
+            response = self._responses.get(request_id)
+            request = self._requests.get(request_id)
+            if response is None or not self._should_capture_body(request, response):
+                return
+        body = await self._fetch_body(tab, request_id)
+        if body is None or len(body) > MAX_CAPTURED_BODY_BYTES:
+            return
+        async with self._lock:
+            response = self._responses.get(request_id)
+            request = self._requests.get(request_id)
+            if response is None or request is None:
+                return
+            self._drop_body(request_id)
+            instance_id = request.instance_id
+            response.body = body
+            self._body_bytes[instance_id] = self._body_bytes.get(instance_id, 0) + len(body)
+            order = self._body_order.setdefault(instance_id, OrderedDict())
+            order[request_id] = None
+            while self._body_bytes[instance_id] > MAX_STORED_BODY_BYTES and order:
+                self._drop_body(next(iter(order)))
 
     async def set_capture_filters(
         self,
@@ -252,12 +349,11 @@ class NetworkInterceptor:
                     continue
                 if payload_contains and (not request.post_data or payload_contains.lower() not in request.post_data.lower()):
                     continue
-                if response_contains and response and response.body:
-                    try:
-                        body_str = response.body.decode('utf-8', errors='ignore')
-                        if response_contains.lower() not in body_str.lower():
-                            continue
-                    except:
+                if response_contains:
+                    if not response or not response.body:
+                        continue
+                    body_str = response.body.decode('utf-8', errors='ignore')
+                    if response_contains.lower() not in body_str.lower():
                         continue
 
                 matches.append({
@@ -322,22 +418,33 @@ class NetworkInterceptor:
 
     async def get_response_body(self, tab: Tab, request_id: str) -> Optional[bytes]:
         """
-        Get response body content.
+        Get response body content, from the capture store or the browser.
 
         tab: Tab - The browser tab.
         request_id: str - The request identifier.
         Returns: Optional[bytes] - The response body as bytes, or None.
         """
+        async with self._lock:
+            response = self._responses.get(request_id)
+            if response is not None and response.body is not None:
+                return response.body
+        return await self._fetch_body(tab, request_id)
+
+    async def _fetch_body(self, tab: Tab, request_id: str) -> Optional[bytes]:
+        """
+        Read a response body from the browser.
+
+        tab: Tab - The browser tab.
+        request_id: str - The request identifier.
+        Returns: Optional[bytes] - The response body as bytes, or None when the browser no longer has it.
+        """
         try:
-            # Convert string to RequestId object
-            request_id_obj = uc.cdp.network.RequestId(request_id)
-            result = await tab.send(uc.cdp.network.get_response_body(request_id=request_id_obj))
+            result = await tab.send(uc.cdp.network.get_response_body(request_id=uc.cdp.network.RequestId(request_id)))
             if result:
-                body, base64_encoded = result  # Result is a tuple (body, base64Encoded)
+                body, base64_encoded = result
                 if base64_encoded:
                     return base64.b64decode(body)
-                else:
-                    return body.encode("utf-8")
+                return body.encode("utf-8")
         except Exception:
             pass
         return None
@@ -493,11 +600,10 @@ class NetworkInterceptor:
         try:
             if url:
                 # For specific URL, get all cookies for that URL and delete them
-                cookies = await tab.send(uc.cdp.network.get_cookies(urls=[url]))
-                for cookie in cookies:
+                for cookie in await cdp_raw.get_cookies(tab, urls=[url]):
                     await tab.send(
                         uc.cdp.network.delete_cookies(
-                            name=cookie.name,
+                            name=cookie["name"],
                             url=url
                         )
                     )
@@ -531,16 +637,7 @@ class NetworkInterceptor:
         Returns: List[Dict[str, Any]] - List of cookies.
         """
         try:
-            if urls:
-                result = await tab.send(uc.cdp.network.get_cookies(urls=urls))
-            else:
-                result = await tab.send(uc.cdp.network.get_all_cookies())
-            if isinstance(result, dict):
-                return result.get("cookies", [])
-            elif isinstance(result, list):
-                return result
-            else:
-                return []
+            return await cdp_raw.get_cookies(tab, urls=urls, all_cookies=True)
         except Exception as e:
             raise Exception(f"Failed to get cookies: {str(e)}")
 
@@ -587,3 +684,6 @@ class NetworkInterceptor:
                     self._requests.pop(req_id, None)
                     self._responses.pop(req_id, None)
                 del self._instance_requests[instance_id]
+            self._body_bytes.pop(instance_id, None)
+            self._body_order.pop(instance_id, None)
+            self._instance_filters.pop(instance_id, None)

@@ -6,10 +6,10 @@
         modules: []
     };
     
-    const analyzeCss = $ANALYZE_CSS;
-    const analyzeJs = $ANALYZE_JS;
-    const followImports = $FOLLOW_IMPORTS;
-    const maxDepth = $MAX_DEPTH;
+    const analyzeCss = $ANALYZE_CSS$;
+    const analyzeJs = $ANALYZE_JS$;
+    const followImports = $FOLLOW_IMPORTS$;
+    const maxDepth = $MAX_DEPTH$;
     
     if (analyzeCss) {
         // Extract stylesheets

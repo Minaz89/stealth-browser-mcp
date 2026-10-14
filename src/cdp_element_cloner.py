@@ -15,13 +15,15 @@ This provides 100% accurate element cloning by using CDP's native capabilities
 instead of limited JavaScript-based extraction.
 """
 
-import asyncio
-import json
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List
 
 import nodriver as uc
-from debug_logger import debug_logger
+
+try:
+    from .debug_logger import debug_logger
+except ImportError:
+    from debug_logger import debug_logger
 
 
 class CDPElementCloner:
@@ -86,7 +88,7 @@ class CDPElementCloner:
                     "children_count": len(children)
                 }
             }
-            debug_logger.log_info("cdp_cloner", "extract_complete", f"CDP extraction completed successfully")
+            debug_logger.log_info("cdp_cloner", "extract_complete", "CDP extraction completed successfully")
             return result
         except Exception as e:
             debug_logger.log_error("cdp_cloner", "extract_complete", f"CDP extraction failed: {str(e)}")
@@ -254,7 +256,7 @@ class CDPElementCloner:
         if not css_style:
             return {}
         return {
-            "cssText": css_style.css_text_ or "",
+            "cssText": css_style.css_text or "",
             "properties": [
                 {
                     "name": prop.name,
@@ -265,7 +267,7 @@ class CDPElementCloner:
                     "parsedOk": prop.parsed_ok,
                     "disabled": prop.disabled
                 }
-                for prop in css_style.css_properties_
+                for prop in css_style.css_properties
             ]
         }
 
@@ -285,7 +287,7 @@ class CDPElementCloner:
                 "selectorText": rule_match.rule.selector_list.text if rule_match.rule.selector_list else "",
                 "origin": str(rule_match.rule.origin),
                 "style": self._css_style_to_dict(rule_match.rule.style),
-                "styleSheetId": str(rule_match.rule.style_sheet_id_) if rule_match.rule.style_sheet_id_ else None
+                "styleSheetId": str(rule_match.rule.style_sheet_id) if rule_match.rule.style_sheet_id else None
             }
         }
 
@@ -301,8 +303,8 @@ class CDPElementCloner:
         """
         return {
             "pseudoType": str(pseudo_element.pseudo_type),
-            "pseudoIdentifier": pseudo_element.pseudo_identifier_,
-            "matches": [self._rule_match_to_dict(match) for match in pseudo_element.matches_]
+            "pseudoIdentifier": pseudo_element.pseudo_identifier,
+            "matches": [self._rule_match_to_dict(match) for match in pseudo_element.matches]
         }
 
     def _inherited_style_to_dict(self, inherited_style) -> Dict[str, Any]:

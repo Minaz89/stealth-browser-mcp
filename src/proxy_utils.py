@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List, Optional
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 
 class ProxyConfigError(ValueError):
@@ -27,13 +27,19 @@ def _format_host(hostname: str) -> str:
 
 
 def parse_proxy_config(proxy_url: str) -> ProxyConfig:
-    """Parse a proxy URL into a Chrome-compatible server string + credentials."""
+    """Parse a proxy URL into a Chrome-compatible server string + credentials.
+
+    Credentials are percent-decoded, so passwords containing reserved
+    characters such as @ or : can be passed URL-encoded. Error messages
+    never include the credentials.
+    """
 
     if not isinstance(proxy_url, str) or not proxy_url.strip():
         raise ProxyConfigError("Proxy URL is empty")
 
     raw = proxy_url.strip()
     value = raw if "://" in raw else f"http://{raw}"
+    raw = redact_launch_arg(value)
 
     try:
         parsed = urlsplit(value)
@@ -63,8 +69,8 @@ def parse_proxy_config(proxy_url: str) -> ProxyConfig:
 
     return ProxyConfig(
         server=server,
-        username=parsed.username,
-        password=parsed.password,
+        username=unquote(parsed.username) if parsed.username is not None else None,
+        password=unquote(parsed.password) if parsed.password is not None else None,
     )
 
 

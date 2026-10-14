@@ -6,143 +6,42 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from nodriver import Tab, Element
+from nodriver import Tab
+
+import input_actions
 from debug_logger import debug_logger
 from file_upload_security import validate_upload_paths
-from models import ElementInfo, ElementAction
+from js_values import evaluate_to_python
+from key_definitions import MODIFIER_SHIFT, resolve_key_descriptor, resolve_modifiers
+from models import ElementInfo
+
+DEFAULT_ELEMENT_TIMEOUT = 10.0
+WAIT_POLL_INTERVAL = 0.1
+ELEMENT_READY_JS = """function (visible, text) {
+  if (visible) {
+    const style = window.getComputedStyle(this);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+  }
+  return !text || (this.innerText || this.textContent || '').includes(text);
+}"""
 
 
-
-MODIFIER_ALT = 1
-MODIFIER_CONTROL = 2
-MODIFIER_META = 4
-MODIFIER_SHIFT = 8
-
-MODIFIER_ALIASES: Dict[str, tuple] = {
-    "alt": ("Alt", MODIFIER_ALT),
-    "option": ("Alt", MODIFIER_ALT),
-    "control": ("Control", MODIFIER_CONTROL),
-    "ctrl": ("Control", MODIFIER_CONTROL),
-    "meta": ("Meta", MODIFIER_META),
-    "cmd": ("Meta", MODIFIER_META),
-    "command": ("Meta", MODIFIER_META),
-    "shift": ("Shift", MODIFIER_SHIFT),
-}
-
-NAMED_KEYS: Dict[str, tuple] = {
-    "enter": ("Enter", "Enter", 13, "\r"),
-    "tab": ("Tab", "Tab", 9, None),
-    "escape": ("Escape", "Escape", 27, None),
-    "arrowdown": ("ArrowDown", "ArrowDown", 40, None),
-    "arrowup": ("ArrowUp", "ArrowUp", 38, None),
-    "arrowleft": ("ArrowLeft", "ArrowLeft", 37, None),
-    "arrowright": ("ArrowRight", "ArrowRight", 39, None),
-    "backspace": ("Backspace", "Backspace", 8, None),
-    "delete": ("Delete", "Delete", 46, None),
-    "home": ("Home", "Home", 36, None),
-    "end": ("End", "End", 35, None),
-    "pageup": ("PageUp", "PageUp", 33, None),
-    "pagedown": ("PageDown", "PageDown", 34, None),
-    "space": (" ", "Space", 32, " "),
-}
-
-NAMED_KEYS.update({
-    f"f{n}": (f"F{n}", f"F{n}", 111 + n, None) for n in range(1, 13)
-})
-
-PRINTABLE_KEY_CODES: Dict[str, tuple] = {
-    " ": ("Space", 32),
-    "-": ("Minus", 189), "_": ("Minus", 189),
-    "=": ("Equal", 187), "+": ("Equal", 187),
-    "[": ("BracketLeft", 219), "{": ("BracketLeft", 219),
-    "]": ("BracketRight", 221), "}": ("BracketRight", 221),
-    "\\": ("Backslash", 220), "|": ("Backslash", 220),
-    ";": ("Semicolon", 186), ":": ("Semicolon", 186),
-    "'": ("Quote", 222), '"': ("Quote", 222),
-    ",": ("Comma", 188), "<": ("Comma", 188),
-    ".": ("Period", 190), ">": ("Period", 190),
-    "/": ("Slash", 191), "?": ("Slash", 191),
-    "`": ("Backquote", 192), "~": ("Backquote", 192),
-    "!": ("Digit1", 49), "@": ("Digit2", 50), "#": ("Digit3", 51),
-    "$": ("Digit4", 52), "%": ("Digit5", 53), "^": ("Digit6", 54),
-    "&": ("Digit7", 55), "*": ("Digit8", 56), "(": ("Digit9", 57),
-    ")": ("Digit0", 48),
-}
-
-
-def supported_key_names() -> List[str]:
-    """List the named keys accepted by press_key, for error messages."""
-    named = [
-        "Enter", "Tab", "Escape", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight",
-        "Backspace", "Delete", "Home", "End", "PageUp", "PageDown", "Space",
-    ]
-    return named + [f"F{n}" for n in range(1, 13)]
-
-
-def resolve_key_descriptor(key: str) -> Dict[str, Any]:
-    """Map a named key or supported ASCII printable character to CDP fields."""
-    if not isinstance(key, str) or key == "":
-        raise Exception(
-            "Invalid key. Use a supported named key or one ASCII printable character."
-        )
-
-    if len(key) == 1 and key != " ":
-        code, virtual_key_code = PRINTABLE_KEY_CODES.get(key, ("", 0))
-        if not code and "a" <= key.lower() <= "z":
-            code = f"Key{key.upper()}"
-            virtual_key_code = ord(key.upper())
-        elif not code and "0" <= key <= "9":
-            code = f"Digit{key}"
-            virtual_key_code = ord(key)
-        if not code or not key.isascii() or not key.isprintable():
-            raise Exception(
-                f"Unsupported key {key!r}. Use a supported named key or one ASCII printable character."
-            )
-        return {"key": key, "code": code, "virtual_key_code": virtual_key_code, "text": key}
-
-    lookup = "space" if key == " " else key.strip().lower()
-    named = NAMED_KEYS.get(lookup)
-    if named is None:
-        raise Exception(
-            f"Unsupported key {key!r}. Supported named keys: {', '.join(supported_key_names())}."
-        )
-
-    dom_key, code, virtual_key_code, text = named
-    return {"key": dom_key, "code": code, "virtual_key_code": virtual_key_code, "text": text}
-
-
-def resolve_modifiers(modifiers: Optional[List[str]]) -> tuple:
+async def evaluate_or_raise(tab: Tab, expression: str, await_promise: bool = False) -> Any:
     """
-    Combine modifier names into the CDP modifiers bitmask.
+    Evaluate JavaScript and raise when the script throws.
 
     Args:
-        modifiers (Optional[List[str]]): Any of Shift, Control/Ctrl, Alt, Meta/Cmd.
+        tab (Tab): The browser tab object.
+        expression (str): JavaScript expression to evaluate.
+        await_promise (bool): Await the result when it is a Promise.
 
     Returns:
-        tuple: (bitmask int, canonical modifier names list).
+        Any: Plain Python value produced by the script.
     """
-    if not modifiers:
-        return 0, []
-
-    if isinstance(modifiers, str):
-        modifiers = [modifiers]
-
-    mask = 0
-    canonical: List[str] = []
-    for modifier in modifiers:
-        entry = MODIFIER_ALIASES.get(str(modifier).strip().lower())
-        if entry is None:
-            raise Exception(
-                f"Unsupported modifier: {modifier!r}. "
-                "Supported modifiers: Shift, Control (Ctrl), Alt, Meta (Cmd)."
-            )
-        name, bit = entry
-        mask |= bit
-        if name not in canonical:
-            canonical.append(name)
-
-    return mask, canonical
-
+    value, error = await evaluate_to_python(tab, expression, await_promise=await_promise)
+    if error:
+        raise Exception(f"JavaScript error: {error}")
+    return value
 
 
 class DOMHandler:
@@ -287,6 +186,24 @@ class DOMHandler:
             return []
 
     @staticmethod
+    async def _resolve_target(tab: Tab, selector: str, timeout: float) -> int:
+        """
+        Resolve a selector to a backend node id or raise.
+
+        Args:
+            tab (Tab): The browser tab object.
+            selector (str): CSS selector.
+            timeout (float): Seconds to wait for the element.
+
+        Returns:
+            int: Backend node id.
+        """
+        backend_node_id = await input_actions.find_node(tab, selector, timeout)
+        if backend_node_id is None:
+            raise Exception(f"Element not found: {selector}")
+        return backend_node_id
+
+    @staticmethod
     async def click_element(
         tab: Tab,
         selector: str,
@@ -294,7 +211,12 @@ class DOMHandler:
         timeout: int = 10000
     ) -> bool:
         """
-        Click an element with smart retry logic.
+        Click an element with trusted mouse events.
+
+        The element is scrolled into view, the mouse moves to its center, and
+        the left button is pressed and released, producing the same pointer,
+        mouse, and click events a user would. Elements without a layout box or
+        covered by another element are clicked through JavaScript instead.
 
         Args:
             tab (Tab): The browser tab object.
@@ -303,29 +225,18 @@ class DOMHandler:
             timeout (int): Timeout in milliseconds.
 
         Returns:
-            bool: True if click succeeded, False otherwise.
+            bool: True if click succeeded.
         """
         try:
-            element = None
-
             if text_match:
-                element = await tab.find(text_match, best_match=True)
+                element = await tab.find(text_match, best_match=True, timeout=timeout / 1000)
+                if not element:
+                    raise Exception(f"Element not found with text: {text_match}")
+                backend_node_id = int(element.backend_node_id)
             else:
-                element = await tab.select(selector, timeout=timeout/1000)
-
-            if not element:
-                raise Exception(f"Element not found: {selector}")
-
-            await element.scroll_into_view()
-            await asyncio.sleep(0.5)
-
-            try:
-                await element.click()
-            except Exception:
-                await element.mouse_click()
-
+                backend_node_id = await DOMHandler._resolve_target(tab, selector, timeout / 1000)
+            await input_actions.click_node(tab, backend_node_id)
             return True
-
         except Exception as e:
             raise Exception(f"Failed to click element: {str(e)}")
 
@@ -340,7 +251,11 @@ class DOMHandler:
         shift_enter: bool = False
     ) -> bool:
         """
-        Type text with human-like delays and optional newline parsing.
+        Type text with trusted keyboard events and human-like delays.
+
+        Each ASCII character produces keydown, keypress, input, and keyup
+        events, with Shift held for capitals and shifted symbols. Other
+        characters are inserted like an input method would.
 
         Args:
             tab (Tab): The browser tab object.
@@ -348,76 +263,23 @@ class DOMHandler:
             text (str): Text to type.
             clear_first (bool): Clear input before typing.
             delay_ms (int): Delay between keystrokes in milliseconds.
-            parse_newlines (bool): If True, parse \n as Enter key presses.
-            shift_enter (bool): If True, use Shift+Enter instead of Enter (for chat apps).
+            parse_newlines (bool): If True, press Enter for each \n instead of inserting a line break.
+            shift_enter (bool): If True, press Shift+Enter for each \n (for chat apps).
 
         Returns:
-            bool: True if typing succeeded, False otherwise.
+            bool: True if typing succeeded.
         """
         try:
-            element = await tab.select(selector)
-            if not element:
-                raise Exception(f"Element not found: {selector}")
-
-            await element.focus()
-            await asyncio.sleep(0.1)
-
+            backend_node_id = await DOMHandler._resolve_target(tab, selector, DEFAULT_ELEMENT_TIMEOUT)
+            await input_actions.focus_node(tab, backend_node_id)
             if clear_first:
-                try:
-                    await element.apply("(elem) => { elem.value = ''; }")
-                except:
-                    await element.send_keys('\ue009' + 'a')
-                    await element.send_keys('\ue017')
-                await asyncio.sleep(0.1)
-
-            if parse_newlines:
-                from nodriver import cdp
-                lines = text.split('\n')
-                for i, line in enumerate(lines):
-                    for char in line:
-                        await element.send_keys(char)
-                        await asyncio.sleep(delay_ms / 1000)
-                    
-                    if i < len(lines) - 1:
-                        if shift_enter:
-                            await element.apply('''(elem) => {
-                                const start = elem.selectionStart;
-                                const end = elem.selectionEnd;
-                                const value = elem.value;
-                                elem.value = value.substring(0, start) + '\\n' + value.substring(end);
-                                elem.selectionStart = elem.selectionEnd = start + 1;
-                                
-                                elem.dispatchEvent(new KeyboardEvent('keydown', {
-                                    key: 'Enter',
-                                    code: 'Enter',
-                                    shiftKey: true,
-                                    bubbles: true
-                                }));
-                                elem.dispatchEvent(new Event('input', { bubbles: true }));
-                            }''')
-                        else:
-                            await element.apply('''(elem) => {
-                                const start = elem.selectionStart;
-                                const end = elem.selectionEnd;
-                                const value = elem.value;
-                                elem.value = value.substring(0, start) + '\\n' + value.substring(end);
-                                elem.selectionStart = elem.selectionEnd = start + 1;
-                                
-                                elem.dispatchEvent(new KeyboardEvent('keydown', {
-                                    key: 'Enter',
-                                    code: 'Enter',
-                                    bubbles: true
-                                }));
-                                elem.dispatchEvent(new Event('input', { bubbles: true }));
-                            }''')
-                        await asyncio.sleep(delay_ms / 1000)
-            else:
-                for char in text:
-                    await element.send_keys(char)
-                    await asyncio.sleep(delay_ms / 1000)
-
+                await input_actions.clear_field(tab, backend_node_id)
+            delay = max(delay_ms, 0) / 1000
+            for index, char in enumerate(text):
+                await input_actions.type_character(tab, char, parse_newlines or shift_enter, shift_enter)
+                if delay and index < len(text) - 1:
+                    await asyncio.sleep(delay)
             return True
-
         except Exception as e:
             raise Exception(f"Failed to type text: {str(e)}")
 
@@ -429,8 +291,10 @@ class DOMHandler:
         clear_first: bool = True
     ) -> bool:
         """
-        Paste text instantly using nodriver's insert_text method.
-        This is much faster than typing character by character.
+        Insert text in one step, like a paste.
+
+        Much faster than typing character by character. The page receives
+        beforeinput and input events but no key events.
 
         Args:
             tab (Tab): The browser tab object.
@@ -439,54 +303,17 @@ class DOMHandler:
             clear_first (bool): Clear input before pasting.
 
         Returns:
-            bool: True if pasting succeeded, False otherwise.
+            bool: True if pasting succeeded.
         """
         from nodriver import cdp
-        
+
         try:
-            element = await tab.select(selector)
-            if not element:
-                raise Exception(f"Element not found: {selector}")
-
-            await element.focus()
-            await asyncio.sleep(0.1)
-
+            backend_node_id = await DOMHandler._resolve_target(tab, selector, DEFAULT_ELEMENT_TIMEOUT)
+            await input_actions.focus_node(tab, backend_node_id)
             if clear_first:
-                try:
-                    await element.apply("(elem) => { elem.value = ''; }")
-                except:
-                    await tab.send(cdp.input_.dispatch_key_event(
-                        "rawKeyDown", 
-                        modifiers=2,  # Ctrl
-                        key="a",
-                        code="KeyA",
-                        windows_virtual_key_code=65
-                    ))
-                    await tab.send(cdp.input_.dispatch_key_event(
-                        "keyUp", 
-                        modifiers=2,  # Ctrl
-                        key="a",
-                        code="KeyA",
-                        windows_virtual_key_code=65
-                    ))
-                    await tab.send(cdp.input_.dispatch_key_event(
-                        "rawKeyDown",
-                        key="Delete",
-                        code="Delete",
-                        windows_virtual_key_code=46
-                    ))
-                    await tab.send(cdp.input_.dispatch_key_event(
-                        "keyUp",
-                        key="Delete", 
-                        code="Delete",
-                        windows_virtual_key_code=46
-                    ))
-                await asyncio.sleep(0.1)
-
+                await input_actions.clear_field(tab, backend_node_id)
             await tab.send(cdp.input_.insert_text(text))
-
             return True
-
         except Exception as e:
             raise Exception(f"Failed to paste text: {str(e)}")
 
@@ -527,11 +354,8 @@ class DOMHandler:
             modifier_mask, canonical_modifiers = resolve_modifiers(modifiers)
 
             if selector:
-                element = await tab.select(selector)
-                if not element:
-                    raise Exception(f"Element not found: {selector}")
-                await element.focus()
-                await asyncio.sleep(0.1)
+                backend_node_id = await DOMHandler._resolve_target(tab, selector, DEFAULT_ELEMENT_TIMEOUT)
+                await input_actions.focus_node(tab, backend_node_id)
 
             text = descriptor["text"]
             unmodified_text = text
@@ -660,35 +484,35 @@ class DOMHandler:
             if not select_element:
                 raise Exception(f"Select element not found: {selector}")
 
-            if text is not None:
-                await select_element.send_keys(text)
-                return True
-
             if value is not None:
-                safe_selector = json.dumps(selector)
-                safe_value = json.dumps(value)
-                await tab.evaluate(f"""
-                    const select = document.querySelector({safe_selector});
-                    if (select) {{
-                        select.value = {safe_value};
-                        select.dispatchEvent(new Event('change', {{bubbles: true}}));
-                    }}
-                """)
-                return True
-
+                criteria = {"value": str(value)}
+            elif text is not None:
+                criteria = {"text": str(text)}
             elif index is not None:
-                safe_selector = json.dumps(selector)
-                safe_index = int(index)
-                await tab.evaluate(f"""
-                    const select = document.querySelector({safe_selector});
-                    if (select && {safe_index} >= 0 && {safe_index} < select.options.length) {{
-                        select.selectedIndex = {safe_index};
-                        select.dispatchEvent(new Event('change', {{bubbles: true}}));
-                    }}
-                """)
-                return True
+                criteria = {"index": int(index)}
+            else:
+                raise Exception("No selection criteria provided (value, text, or index)")
 
-            raise Exception("No selection criteria provided (value, text, or index)")
+            selected = await evaluate_or_raise(tab, f"""
+                (() => {{
+                    const select = document.querySelector({json.dumps(selector)});
+                    const criteria = {json.dumps(criteria)};
+                    if (!select || !select.options) return false;
+                    const options = Array.from(select.options);
+                    let target = -1;
+                    if ('value' in criteria) target = options.findIndex(o => o.value === criteria.value);
+                    else if ('text' in criteria) target = options.findIndex(o => o.text.trim() === criteria.text.trim());
+                    else if (criteria.index >= 0 && criteria.index < options.length) target = criteria.index;
+                    if (target < 0) return false;
+                    select.selectedIndex = target;
+                    select.dispatchEvent(new Event('input', {{bubbles: true}}));
+                    select.dispatchEvent(new Event('change', {{bubbles: true}}));
+                    return true;
+                }})()
+            """)
+            if not selected:
+                raise Exception(f"No matching option for {criteria} in {selector}")
+            return True
 
         except Exception as e:
             raise Exception(f"Failed to select option: {str(e)}")
@@ -751,6 +575,9 @@ class DOMHandler:
         """
         Wait for element to appear and match conditions.
 
+        Polls every 100 ms with a root-only DOM lookup, so it reacts quickly
+        without fetching the whole DOM tree on each poll.
+
         Args:
             tab (Tab): The browser tab object.
             selector (str): CSS selector for the element.
@@ -761,44 +588,23 @@ class DOMHandler:
         Returns:
             bool: True if element matches conditions, False otherwise.
         """
-        start_time = time.time()
-        timeout_seconds = timeout / 1000
-
-        while time.time() - start_time < timeout_seconds:
+        deadline = time.monotonic() + max(timeout, 0) / 1000
+        while True:
             try:
-                element = await tab.select(selector)
-
-                if element:
-                    if visible:
-                        try:
-                            is_visible = await element.apply(
-                                """(elem) => {
-                                    var style = window.getComputedStyle(elem);
-                                    return style.display !== 'none' && 
-                                           style.visibility !== 'hidden' && 
-                                           style.opacity !== '0';
-                                }"""
-                            )
-                            if not is_visible:
-                                await asyncio.sleep(0.5)
-                                continue
-                        except:
-                            pass
-
-                    if text_content:
-                        text = element.text_all
-                        if text_content not in text:
-                            await asyncio.sleep(0.5)
-                            continue
-
+                backend_node_id = await input_actions.find_node(tab, selector)
+                if backend_node_id is not None and await input_actions.call_on_node(
+                    tab,
+                    backend_node_id,
+                    ELEMENT_READY_JS,
+                    visible,
+                    text_content,
+                ):
                     return True
-
             except Exception:
                 pass
-
-            await asyncio.sleep(0.5)
-
-        return False
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(WAIT_POLL_INTERVAL)
 
     @staticmethod
     async def execute_script(
@@ -809,22 +615,23 @@ class DOMHandler:
         """
         Execute JavaScript in page context.
 
+        Without args, the script is evaluated as an expression and its value
+        is returned. With args, the script is used as a function body, so it
+        must use return and reads its arguments through the arguments object.
+
         Args:
             tab (Tab): The browser tab object.
             script (str): JavaScript code to execute.
             args (Optional[List[Any]]): Arguments for the script.
 
         Returns:
-            Any: Result of script execution.
+            Any: Result of script execution as plain JSON-like data.
         """
         try:
             if args:
                 serialized_args = ",".join(json.dumps(a) for a in args)
-                result = await tab.evaluate(f'(function() {{ {script} }})({serialized_args})')
-            else:
-                result = await tab.evaluate(script)
-
-            return result
+                return await evaluate_or_raise(tab, f'(function() {{ {script} }})({serialized_args})')
+            return await evaluate_or_raise(tab, script)
 
         except Exception as e:
             raise Exception(f"Failed to execute script: {str(e)}")
@@ -900,15 +707,16 @@ class DOMHandler:
         """
         try:
             behavior = "'smooth'" if smooth else "'instant'"
+            distance = abs(int(amount))
 
             if direction == "down":
-                script = f"window.scrollBy({{top: {amount}, left: 0, behavior: {behavior}}})"
+                script = f"window.scrollBy({{top: {distance}, left: 0, behavior: {behavior}}})"
             elif direction == "up":
-                script = f"window.scrollBy({{top: -{amount}, left: 0, behavior: {behavior}}})"
+                script = f"window.scrollBy({{top: {-distance}, left: 0, behavior: {behavior}}})"
             elif direction == "right":
-                script = f"window.scrollBy({{top: 0, left: {amount}, behavior: {behavior}}})"
+                script = f"window.scrollBy({{top: 0, left: {distance}, behavior: {behavior}}})"
             elif direction == "left":
-                script = f"window.scrollBy({{top: 0, left: -{amount}, behavior: {behavior}}})"
+                script = f"window.scrollBy({{top: 0, left: {-distance}, behavior: {behavior}}})"
             elif direction == "top":
                 script = f"window.scrollTo({{top: 0, left: 0, behavior: {behavior}}})"
             elif direction == "bottom":
@@ -916,7 +724,7 @@ class DOMHandler:
             else:
                 raise ValueError(f"Invalid scroll direction: {direction}")
 
-            await tab.evaluate(script)
+            await evaluate_or_raise(tab, script)
             await asyncio.sleep(0.5 if smooth else 0.1)
 
             return True

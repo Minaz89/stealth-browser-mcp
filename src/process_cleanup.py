@@ -7,13 +7,39 @@ import shutil
 import signal
 import sys
 import tempfile
+import threading
 import time
+from functools import wraps
 from pathlib import Path
-from typing import Any, Dict, Optional, Set
+from typing import Any, Callable, Dict, Optional, Set, TypeVar
 
 import psutil
 
 from debug_logger import debug_logger
+
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+def synchronized(method: F) -> F:
+    """
+    Run a ProcessCleanup method while holding the instance lock.
+
+    Cleanup runs in worker threads so it does not block the event loop, and
+    tracking runs on the loop thread, so shared state needs a lock.
+
+    Args:
+        method (F): Method to wrap
+
+    Returns:
+        F: Wrapped method
+    """
+
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper  # type: ignore[return-value]
 
 
 class ProcessCleanup:
@@ -29,6 +55,7 @@ class ProcessCleanup:
         Returns:
             None
         """
+        self._lock = threading.RLock()
         self.pid_file = Path(os.path.expanduser("~/.stealth_browser_pids.json"))
         self.tracked_pids: Set[int] = set()
         self.browser_processes: Dict[str, Dict[str, Any]] = {}
@@ -76,14 +103,32 @@ class ProcessCleanup:
         if not isinstance(pid, int) or pid <= 0:
             return False
         try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
+            return psutil.pid_exists(pid)
+        except Exception:
             return False
-        except PermissionError:
-            return True
-        except OSError:
+
+    @staticmethod
+    def _pid_predates_tracking(pid: int, metadata: Dict[str, Any]) -> bool:
+        """
+        Check that a PID still refers to the process recorded in metadata.
+
+        A PID can be reused after the original browser exits or after a
+        reboot. The recorded process must have started before it was tracked.
+
+        Args:
+            pid (int): Process id taken from tracked metadata.
+            metadata (Dict[str, Any]): Tracked metadata with a tracking timestamp.
+
+        Returns:
+            bool: True when the running process started before it was tracked.
+        """
+        tracked_at = metadata.get("timestamp")
+        if not isinstance(tracked_at, (int, float)):
             return False
-        return True
+        try:
+            return psutil.Process(pid).create_time() <= tracked_at + 5.0
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            return False
 
     @staticmethod
     def _normalize_path(path: Optional[str]) -> Optional[str]:
@@ -271,8 +316,10 @@ class ProcessCleanup:
                 "browser_processes": entries,
                 "timestamp": time.time(),
             }
-            with open(self.pid_file, "w") as file_handle:
+            temp_file = f"{self.pid_file}.{os.getpid()}.tmp"
+            with open(temp_file, "w", encoding="utf-8") as file_handle:
                 json.dump(data, file_handle)
+            os.replace(temp_file, self.pid_file)
         except Exception as error:
             debug_logger.log_warning(
                 "process_cleanup",
@@ -370,7 +417,11 @@ class ProcessCleanup:
         """
         pids_to_kill = self._get_browser_pids_for_profile(metadata.get("user_data_dir"))
         fallback_pid = metadata.get("pid")
-        if not pids_to_kill and isinstance(fallback_pid, int):
+        if (
+            not pids_to_kill
+            and isinstance(fallback_pid, int)
+            and self._pid_predates_tracking(fallback_pid, metadata)
+        ):
             pids_to_kill = {fallback_pid}
         if not pids_to_kill:
             return True
@@ -577,6 +628,7 @@ class ProcessCleanup:
         self._write_pid_file(retained)
         self._sweep_orphaned_temp_profiles()
 
+    @synchronized
     def track_browser_process(
         self,
         instance_id: str,
@@ -632,6 +684,7 @@ class ProcessCleanup:
             )
             return False
 
+    @synchronized
     def untrack_browser_process(self, instance_id: str) -> bool:
         """
         Stop tracking a browser process and persist the updated metadata file.
@@ -668,6 +721,7 @@ class ProcessCleanup:
             )
             return False
 
+    @synchronized
     def kill_browser_process(self, instance_id: str) -> bool:
         """
         Kill a specific tracked browser process and clean its temp profile when appropriate.
@@ -702,6 +756,7 @@ class ProcessCleanup:
                 self._save_tracked_pids()
         return success
 
+    @synchronized
     def finalize_browser_process(self, instance_id: str) -> bool:
         """
         Finalize tracked metadata after a browser was stopped elsewhere.
@@ -742,6 +797,7 @@ class ProcessCleanup:
         self._save_tracked_pids()
         return False
 
+    @synchronized
     def cleanup_deferred_profiles(self) -> int:
         """
         Retry cleanup for tracked temp profiles whose browser process is already gone.
@@ -879,6 +935,7 @@ class ProcessCleanup:
             )
             return False
 
+    @synchronized
     def _cleanup_all_tracked(self):
         """
         Clean up all tracked browser processes and temp profiles for the current run.
@@ -930,6 +987,7 @@ class ProcessCleanup:
                 f"Failed to clear PID file: {error}",
             )
 
+    @synchronized
     def get_tracked_processes(self) -> Dict[str, int]:
         """
         Return currently tracked browser PIDs keyed by instance id.
@@ -943,6 +1001,7 @@ class ProcessCleanup:
             if isinstance(metadata.get("pid"), int)
         }
 
+    @synchronized
     def is_process_alive(self, instance_id: str) -> bool:
         """
         Check whether a tracked process is still alive.

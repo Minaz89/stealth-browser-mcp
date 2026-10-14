@@ -4,8 +4,8 @@ import asyncio
 import base64
 import importlib
 import json
+import ipaddress
 import os
-import signal
 import sys
 import tempfile
 from collections import defaultdict
@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import nodriver as uc
 from fastmcp import FastMCP
+from pydantic_core import to_json
 
 from browser_manager import BrowserManager
 from cdp_element_cloner import CDPElementCloner
@@ -29,19 +30,14 @@ from http_security import (
     create_http_auth_provider,
     get_http_auth_token,
 )
-from models import (
-    BrowserOptions,
-    NavigationOptions,
-    ScriptResult,
-    BrowserState,
-    PageState,
-)
+from models import BrowserOptions
 from network_interceptor import NetworkInterceptor
-from dynamic_hook_system import dynamic_hook_system
+from page_bindings import page_bindings
 from dynamic_hook_ai_interface import dynamic_hook_ai
 from persistent_storage import persistent_storage
 from progressive_element_cloner import progressive_element_cloner
 from response_handler import response_handler
+from stdio_guard import install_stdio_guard
 from platform_utils import validate_browser_environment, get_platform_info
 from process_cleanup import process_cleanup
 
@@ -75,9 +71,23 @@ DEBUG_LOGGING_ENABLED = (
 )
 HTTP_AUTH_TOKEN = get_http_auth_token()
 
-def is_section_enabled(section: str) -> bool:
-    """Check if a tool section is enabled."""
-    return section not in DISABLED_SECTIONS
+def is_loopback_host(host: str) -> bool:
+    """
+    Check whether an HTTP bind host only accepts local connections.
+
+    Args:
+        host (str): Host name or IP address passed to --host.
+
+    Returns:
+        bool: True for localhost and loopback addresses.
+    """
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
 
 def section_tool(section: str):
     """Decorator that registers tools and tracks section membership."""
@@ -153,7 +163,9 @@ mcp = FastMCP(
     - Execute JavaScript in page context
     - Manage cookies and storage
     
-    All browser instances are undetectable by anti-bot systems.
+    Instances are built to avoid common bot detection, with trusted input
+    events and a clean headless fingerprint. Measured results against public
+    detection pages are published in STEALTH_TESTS.md.
     """,
     auth=create_http_auth_provider(HTTP_AUTH_TOKEN),
     lifespan=app_lifespan,
@@ -163,6 +175,40 @@ browser_manager = BrowserManager()
 network_interceptor = NetworkInterceptor()
 dom_handler = DOMHandler()
 cdp_function_executor = CDPFunctionExecutor()
+
+
+async def _prepare_tab(tab, instance_id: str, options: BrowserOptions) -> None:
+    """
+    Attach network capture to a tab an instance uses.
+
+    Args:
+        tab (Any): Browser tab.
+        instance_id (str): Browser instance ID.
+        options (BrowserOptions): Spawn options.
+    """
+    await network_interceptor.setup_interception(tab, instance_id, options.block_resources)
+
+
+async def _forget_instance(instance_id: str) -> None:
+    """
+    Drop per-instance state held outside the browser manager.
+
+    Args:
+        instance_id (str): Closed browser instance ID.
+    """
+    await network_interceptor.clear_instance_data(instance_id)
+    cdp_function_executor.forget_instance(instance_id)
+
+
+def _register_manager_listeners() -> None:
+    """Connect tab preparation and close cleanup to the current browser manager."""
+    browser_manager.add_tab_listener(_prepare_tab)
+    browser_manager.add_tab_listener(page_bindings.prepare_tab)
+    browser_manager.add_close_listener(_forget_instance)
+    browser_manager.add_close_listener(page_bindings.forget_instance)
+
+
+_register_manager_listeners()
 
 if DEBUG_LOGGING_ENABLED:
     debug_logger.enable()
@@ -174,11 +220,11 @@ async def spawn_browser(
     viewport_width: int = 1920,
     viewport_height: int = 1080,
     proxy: Optional[str] = None,
-    browser_args: List[str] = None,
+    browser_args: Optional[List[str]] = None,
     timezone_id: Optional[str] = None,
     idle_timeout_seconds: Optional[int] = None,
-    block_resources: List[str] = None,
-    extra_headers: Dict[str, str] = None,
+    block_resources: Optional[List[str]] = None,
+    extra_headers: Optional[Dict[str, str]] = None,
     user_data_dir: Optional[str] = None,
     sandbox: Optional[Any] = None
 ) -> Dict[str, Any]:
@@ -203,10 +249,10 @@ async def spawn_browser(
         Dict[str, Any]: Instance information including instance_id.
     """
     try:
-        from platform_utils import is_running_as_root, is_running_in_container
-        
+        from platform_utils import sandbox_must_be_disabled
+
         if sandbox is None:
-            sandbox = not (is_running_as_root() or is_running_in_container())
+            sandbox = not sandbox_must_be_disabled()
         elif isinstance(sandbox, str):
             sandbox = sandbox.lower() in ('true', '1', 'yes', 'on', 'enabled')
         elif isinstance(sandbox, int):
@@ -229,11 +275,6 @@ async def spawn_browser(
             sandbox=sandbox
         )
         instance = await browser_manager.spawn_browser(options)
-        tab = await browser_manager.get_tab(instance.instance_id)
-        if tab:
-            await network_interceptor.setup_interception(
-                tab, instance.instance_id, block_resources
-            )
         spawn_diagnostics = await browser_manager.get_spawn_diagnostics(instance.instance_id)
         return {
             "instance_id": instance.instance_id,
@@ -243,7 +284,10 @@ async def spawn_browser(
             "spawn_diagnostics": spawn_diagnostics or {},
         }
     except Exception as e:
-        raise Exception(f"Failed to spawn browser: {str(e)}")
+        message = str(e)
+        if not message.startswith("Failed to spawn browser"):
+            message = f"Failed to spawn browser: {message}"
+        raise Exception(message) from e
 
 @section_tool("browser-management")
 async def list_instances() -> List[Dict[str, Any]]:
@@ -287,10 +331,7 @@ async def close_instance(instance_id: str) -> bool:
     Returns:
         bool: True if closed successfully.
     """
-    success = await browser_manager.close_instance(instance_id)
-    if success:
-        await network_interceptor.clear_instance_data(instance_id)
-    return success
+    return await browser_manager.close_instance(instance_id)
 
 @section_tool("browser-management")
 async def get_instance_state(instance_id: str) -> Optional[Dict[str, Any]]:
@@ -388,7 +429,7 @@ async def reload_page(instance_id: str, ignore_cache: bool = False) -> bool:
     tab = await browser_manager.get_tab(instance_id)
     if not tab:
         raise Exception(f"Instance not found: {instance_id}")
-    await tab.reload()
+    await tab.reload(ignore_cache=ignore_cache)
     return True
 
 @section_tool("element-interaction")
@@ -471,16 +512,18 @@ async def type_text(
     shift_enter: bool = False
 ) -> bool:
     """
-    Type text into an input field.
+    Type text into an input field with trusted keyboard events.
+
+    Every character produces keydown, keypress, input, and keyup events.
 
     Args:
         instance_id (str): Browser instance ID.
-        selector (str): CSS selector or XPath.
+        selector (str): CSS selector.
         text (str): Text to type.
         clear_first (bool): Clear field before typing.
         delay_ms (int): Delay between keystrokes in milliseconds.
-        parse_newlines (bool): If True, parse \n as Enter key presses.
-        shift_enter (bool): If True, use Shift+Enter instead of Enter (for chat apps).
+        parse_newlines (bool): If True, press Enter for each \n instead of inserting a line break.
+        shift_enter (bool): If True, press Shift+Enter for each \n (for chat apps).
 
     Returns:
         bool: True if typed successfully.
@@ -529,9 +572,8 @@ async def press_key(
     Press a real key using trusted CDP key events.
 
     Sends Input.dispatchKeyEvent keyDown/keyUp pairs, so the page sees trusted
-    events. Use this instead of type_text(parse_newlines=True) for React-select,
-    typeahead and combobox widgets, which discard values set by synthetic
-    JavaScript KeyboardEvents.
+    events. Use this for control keys such as Enter, Tab, Escape, and the
+    arrow keys in React-select, typeahead, and combobox widgets.
 
     Args:
         instance_id (str): Browser instance ID.
@@ -711,9 +753,10 @@ async def execute_script(
         raise Exception(f"Instance not found: {instance_id}")
     try:
         result = await dom_handler.execute_script(tab, script, args)
+        bounded = response_handler.handle_response(result, "script_result")
         return {
             "success": True,
-            "result": result,
+            "result": bounded,
             "error": None
         }
     except Exception as e:
@@ -770,22 +813,28 @@ async def take_screenshot(
     """
     from PIL import Image
     import io
-    
+
+    format = format.lower()
+    if format == "jpg":
+        format = "jpeg"
+    if format not in ("png", "jpeg"):
+        raise ValueError(f"Unsupported screenshot format: {format}. Use 'png' or 'jpeg'.")
+
     tab = await browser_manager.get_tab(instance_id)
     if not tab:
         raise Exception(f"Instance not found: {instance_id}")
-    
+
     if file_path:
         save_path = Path(file_path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        await tab.save_screenshot(save_path)
+        await tab.save_screenshot(save_path, format=format, full_page=full_page)
         return f"Screenshot saved. AI agents should use the Read tool to view this image: {str(save_path.absolute())}"
     
     with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
         tmp_path = Path(tmp_file.name)
     
     try:
-        await tab.save_screenshot(tmp_path)
+        await tab.save_screenshot(tmp_path, format=format, full_page=full_page)
         
         with Image.open(tmp_path) as img:
             if img.mode in ('RGBA', 'LA', 'P') and format.lower() == 'jpeg':
@@ -923,7 +972,6 @@ async def get_response_content(
         try:
             return body.decode('utf-8')
         except UnicodeDecodeError:
-            import base64
             return base64.b64encode(body).decode('utf-8')
     return None
 
@@ -1139,7 +1187,10 @@ async def set_cookie(
     if domain:
         cookie["domain"] = domain
     if same_site:
-        cookie["same_site"] = same_site
+        try:
+            cookie["same_site"] = uc.cdp.network.CookieSameSite(same_site.capitalize())
+        except ValueError:
+            raise ValueError(f"Invalid same_site value: {same_site}. Use 'Strict', 'Lax', or 'None'.")
     return await network_interceptor.set_cookie(tab, cookie)
 
 
@@ -1177,7 +1228,7 @@ async def get_browser_state_resource(instance_id: str) -> str:
     """
     state = await browser_manager.get_page_state(instance_id)
     if state:
-        return json.dumps(state.dict(), indent=2)
+        return to_json(state, indent=2).decode()
     return json.dumps({"error": "Instance not found"})
 
 
@@ -1195,7 +1246,7 @@ async def get_cookies_resource(instance_id: str) -> str:
     tab = await browser_manager.get_tab(instance_id)
     if tab:
         cookies = await network_interceptor.get_cookies(tab)
-        return json.dumps(cookies, indent=2)
+        return to_json(cookies, indent=2).decode()
     return json.dumps({"error": "Instance not found"})
 
 
@@ -1211,7 +1262,7 @@ async def get_network_resource(instance_id: str) -> str:
         str: JSON string of network requests.
     """
     requests = await network_interceptor.list_requests(instance_id)
-    return json.dumps([req.dict() for req in requests], indent=2)
+    return to_json(requests, indent=2).decode()
 
 
 @mcp.resource("browser://{instance_id}/console")
@@ -1317,7 +1368,7 @@ async def export_debug_logs(
         )
         return filepath
     except asyncio.TimeoutError:
-        return f"Export timeout - file too large. Try with smaller limits or 'gzip-pickle' format."
+        return "Export timeout - file too large. Try with smaller limits or 'gzip-pickle' format."
 
 
 @section_tool("debugging")
@@ -1398,7 +1449,12 @@ async def get_active_tab(instance_id: str) -> Dict[str, Any]:
     tab = await browser_manager.get_active_tab(instance_id)
     if not tab:
         return {"error": "No active tab found"}
-    await tab
+    browser = await browser_manager.get_browser(instance_id, touch_activity=False)
+    if browser:
+        try:
+            await browser.update_targets()
+        except Exception:
+            pass
     return {
         "tab_id": str(tab.target.target_id),
         "url": getattr(tab, 'url', '') or '',
@@ -1422,12 +1478,8 @@ async def new_tab(
     Returns:
         Dict[str, Any]: New tab information.
     """
-    browser = await browser_manager.get_browser(instance_id)
-    if not browser:
-        raise Exception(f"Instance not found: {instance_id}")
     try:
-        new_tab_obj = await browser.get(url, new_tab=True)
-        await new_tab_obj
+        new_tab_obj = await browser_manager.open_tab(instance_id, url)
         return {
             "tab_id": str(new_tab_obj.target.target_id),
             "url": getattr(new_tab_obj, 'url', '') or url,
@@ -1616,7 +1668,7 @@ async def extract_element_assets(
         include_fonts=include_fonts,
         fetch_external=fetch_external
     )
-    return await response_handler.handle_response(result, f"element_assets_{instance_id}_{selector.replace(' ', '_')}")
+    return response_handler.handle_response(result, f"element_assets_{instance_id}_{selector.replace(' ', '_')}")
 
 
 @section_tool("element-extraction")
@@ -1687,7 +1739,7 @@ async def extract_related_files(
         follow_imports=follow_imports,
         max_depth=max_depth
     )
-    return await response_handler.handle_response(result, f"related_files_{instance_id}")
+    return response_handler.handle_response(result, f"related_files_{instance_id}")
 
 
 @section_tool("element-extraction")
@@ -1749,10 +1801,20 @@ async def hot_reload() -> str:
     """
     Hot reload all modules without restarting the server.
 
+    Reloading replaces the browser manager and network interceptor, so it is
+    refused while browser instances are open to avoid orphaning them.
+
     Returns:
         str: Status message.
     """
+    global browser_manager, network_interceptor, dom_handler, debug_logger
     try:
+        active_instances = await browser_manager.list_instances()
+        if active_instances:
+            return (
+                f"Hot reload refused: {len(active_instances)} browser instance(s) are open. "
+                "Close them first so they are not orphaned."
+            )
         modules_to_reload = [
             'browser_manager',
             'network_interceptor',
@@ -1766,17 +1828,16 @@ async def hot_reload() -> str:
                 importlib.reload(sys.modules[module_name])
                 reloaded_modules.append(module_name)
                 if module_name == 'browser_manager':
-                    global browser_manager, BrowserManager
-                    browser_manager = BrowserManager()
+                    await browser_manager.stop_idle_reaper()
+                    browser_manager = sys.modules['browser_manager'].BrowserManager()
+                    _register_manager_listeners()
+                    await browser_manager.start_idle_reaper()
                 elif module_name == 'network_interceptor':
-                    global network_interceptor, NetworkInterceptor
-                    network_interceptor = NetworkInterceptor()
+                    network_interceptor = sys.modules['network_interceptor'].NetworkInterceptor()
                 elif module_name == 'dom_handler':
-                    global dom_handler, DOMHandler
-                    dom_handler = DOMHandler()
+                    dom_handler = sys.modules['dom_handler'].DOMHandler()
                 elif module_name == 'debug_logger':
-                    global debug_logger
-                    from debug_logger import debug_logger
+                    debug_logger = sys.modules['debug_logger'].debug_logger
         return f"Hot reload completed. Reloaded modules: {', '.join(reloaded_modules)}"
     except Exception as e:
         return f"Hot reload failed: {str(e)}"
@@ -1803,9 +1864,9 @@ async def reload_status() -> str:
         for module_name in modules_to_check:
             if module_name in sys.modules:
                 module = sys.modules[module_name]
-                modules_info.append(f"✅ {module_name}: {getattr(module, '__file__', 'built-in')}")
+                modules_info.append(f"[loaded] {module_name}: {getattr(module, '__file__', 'built-in')}")
             else:
-                modules_info.append(f"❌ {module_name}: Not loaded")
+                modules_info.append(f"[missing] {module_name}: Not loaded")
         return "\n".join(modules_info)
     except Exception as e:
         return f"Error checking module status: {str(e)}"
@@ -2334,7 +2395,7 @@ async def list_cdp_commands() -> List[str]:
 async def execute_cdp_command(
     instance_id: str,
     command: str,
-    params: Dict[str, Any] = None
+    params: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Execute any CDP Runtime command with given parameters.
@@ -2383,18 +2444,15 @@ async def add_script_to_evaluate_on_new_document(
     Returns:
         Dict[str, Any]: Result with success state and script identifier.
     """
-    tab = await browser_manager.get_tab(instance_id)
-    if not tab:
-        return {"success": False, "error": f"Instance not found: {instance_id}"}
     try:
-        await tab.send(uc.cdp.page.enable())
-        result = await tab.send(uc.cdp.page.add_script_to_evaluate_on_new_document(
-            source=source,
+        identifier = await browser_manager.add_init_script(
+            instance_id,
+            source,
             world_name=world_name,
             include_command_line_api=include_command_line_api,
             run_immediately=run_immediately,
-        ))
-        return {"success": True, "identifier": str(result)}
+        )
+        return {"success": True, "identifier": identifier}
     except Exception as e:
         debug_logger.log_error("server", "add_script_to_evaluate_on_new_document", e)
         return {"success": False, "error": str(e)}
@@ -2432,7 +2490,7 @@ async def get_execution_contexts(
 @section_tool("cdp-functions")
 async def discover_global_functions(
     instance_id: str,
-    context_id: str = None
+    context_id: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
     Discover all global JavaScript functions available in the page.
@@ -2508,7 +2566,7 @@ async def discover_object_methods(
         for method in methods
     ]
     
-    return await response_handler.handle_response(
+    return response_handler.handle_response(
         methods_data,
         f"object_methods_{object_path.replace('.', '_')}"
     )
@@ -2518,7 +2576,7 @@ async def discover_object_methods(
 async def call_javascript_function(
     instance_id: str,
     function_path: str,
-    args: List[Any] = None
+    args: Optional[List[Any]] = None
 ) -> Dict[str, Any]:
     """
     Call a JavaScript function with arguments.
@@ -2562,7 +2620,7 @@ async def inspect_function_signature(
 async def inject_and_execute_script(
     instance_id: str,
     script_code: str,
-    context_id: str = None
+    context_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Inject and execute custom JavaScript code.
@@ -2601,7 +2659,17 @@ async def create_persistent_function(
     tab = await browser_manager.get_tab(instance_id)
     if not tab:
         return {"success": False, "error": f"Instance not found: {instance_id}"}
-    return await cdp_function_executor.create_persistent_function(tab, function_name, function_code, instance_id)
+    try:
+        source = await cdp_function_executor.prepare_persistent_function(tab, function_name, function_code, instance_id)
+        identifier = await browser_manager.add_init_script(instance_id, source)
+    except Exception as e:
+        return {"success": False, "error": str(e), "function_name": function_name}
+    return {
+        "success": True,
+        "function_name": function_name,
+        "available_as": f"window.{function_name}",
+        "script_identifier": identifier,
+    }
 
 
 @section_tool("cdp-functions")
@@ -2634,38 +2702,114 @@ async def execute_function_sequence(
 
 
 @section_tool("cdp-functions")
-async def create_python_binding(
+async def create_page_binding(
     instance_id: str,
     binding_name: str,
-    python_code: str
+    auto_resolve: bool = False,
+    auto_response: Optional[Any] = None
 ) -> Dict[str, Any]:
     """
-    Create a binding that allows JavaScript to call Python functions.
+    Expose window.<binding_name>(...args) so page JavaScript can call back to you.
+
+    Each call returns a Promise in the page and is queued here. Read calls with
+    get_page_binding_calls and answer them with resolve_page_binding_call, or set
+    auto_resolve to answer every call immediately with auto_response. Nothing
+    runs on the server host. Arguments must be JSON, payloads are capped at
+    64 KB, and at most 500 calls are queued per instance. The binding is
+    installed on every tab of the instance and survives navigation. Calls are
+    delivered through Runtime events.
 
     Args:
         instance_id (str): Browser instance ID.
-        binding_name (str): Name for the binding.
-        python_code (str): Python function code (as string).
+        binding_name (str): JavaScript identifier for the function.
+        auto_resolve (bool): Resolve every call immediately with auto_response.
+        auto_response (Optional[Any]): JSON value returned to the page when auto_resolve is set.
 
     Returns:
-        Dict[str, Any]: Binding creation result.
+        Dict[str, Any]: Creation result.
     """
     tab = await browser_manager.get_tab(instance_id)
     if not tab:
         return {"success": False, "error": f"Instance not found: {instance_id}"}
     try:
-        exec_globals = {}
-        exec(python_code, exec_globals)
-        python_function = None
-        for name, obj in exec_globals.items():
-            if callable(obj) and not name.startswith('_'):
-                python_function = obj
-                break
-        if not python_function:
-            return {"success": False, "error": "No function found in Python code"}
-        return await cdp_function_executor.create_python_binding(tab, binding_name, python_function)
+        return await page_bindings.create(tab, instance_id, binding_name, auto_resolve, auto_response)
     except Exception as e:
-        return {"success": False, "error": f"Failed to create Python function: {str(e)}"}
+        return {"success": False, "error": str(e)}
+
+
+@section_tool("cdp-functions")
+async def get_page_binding_calls(
+    instance_id: str,
+    binding_name: Optional[str] = None,
+    wait_seconds: float = 0,
+    limit: int = 50
+) -> Dict[str, Any]:
+    """
+    Read calls made by page JavaScript to page bindings.
+
+    Pending calls stay queued until resolved. Auto-resolved calls are returned
+    once and then removed.
+
+    Args:
+        instance_id (str): Browser instance ID.
+        binding_name (Optional[str]): Only return calls to this binding.
+        wait_seconds (float): Wait up to this many seconds (max 60) for a call when none is queued.
+        limit (int): Maximum number of calls to return.
+
+    Returns:
+        Dict[str, Any]: Calls (call_id, binding, args, received_at, status) and binding names.
+    """
+    await browser_manager.touch_instance(instance_id)
+    calls = await page_bindings.get_calls(instance_id, binding_name, wait_seconds, limit)
+    return {"calls": calls, "bindings": page_bindings.list_bindings(instance_id)}
+
+
+@section_tool("cdp-functions")
+async def resolve_page_binding_call(
+    instance_id: str,
+    call_id: str,
+    result: Optional[Any] = None,
+    error: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Answer a pending page binding call.
+
+    Args:
+        instance_id (str): Browser instance ID.
+        call_id (str): Call ID from get_page_binding_calls.
+        result (Optional[Any]): JSON value the page Promise resolves with.
+        error (Optional[str]): Reject the page Promise with this message instead.
+
+    Returns:
+        Dict[str, Any]: Whether the answer reached the page.
+    """
+    await browser_manager.touch_instance(instance_id)
+    try:
+        return await page_bindings.resolve(instance_id, call_id, result, error)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@section_tool("cdp-functions")
+async def remove_page_binding(
+    instance_id: str,
+    binding_name: str
+) -> Dict[str, Any]:
+    """
+    Remove a page binding from every tab and reject its pending calls.
+
+    Args:
+        instance_id (str): Browser instance ID.
+        binding_name (str): Binding to remove.
+
+    Returns:
+        Dict[str, Any]: Removal result.
+    """
+    await browser_manager.touch_instance(instance_id)
+    try:
+        return await page_bindings.remove(instance_id, binding_name)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 @section_tool("cdp-functions")
@@ -2691,7 +2835,7 @@ async def execute_python_in_browser(
 
 @section_tool("cdp-functions")
 async def get_function_executor_info(
-    instance_id: str = None
+    instance_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Get information about the CDP function executor state.
@@ -2894,8 +3038,8 @@ if __name__ == "__main__":
                       help="Transport protocol to use")
     parser.add_argument("--port", type=int, default=int(os.getenv("PORT", 8000)),
                       help="Port for HTTP transport")
-    parser.add_argument("--host", default="0.0.0.0",
-                      help="Host for HTTP transport")
+    parser.add_argument("--host", default="127.0.0.1",
+                      help="Host for HTTP transport (use 0.0.0.0 only with an auth token on trusted networks)")
     
     parser.add_argument("--disable-browser-management", action="store_true",
                       help="Disable browser management tools (spawn, navigate, close, etc.)")
@@ -2993,6 +3137,13 @@ if __name__ == "__main__":
         )
     
     if args.transport == "http":
+        if HTTP_AUTH_TOKEN is None and not is_loopback_host(args.host):
+            print(
+                f"WARNING: HTTP transport is listening on {args.host} without an auth token. "
+                "Set STEALTH_BROWSER_MCP_AUTH_TOKEN before exposing the server beyond localhost.",
+                file=sys.stderr,
+            )
         mcp.run(transport="http", host=args.host, port=args.port)
     else:
+        install_stdio_guard()
         mcp.run(transport="stdio")

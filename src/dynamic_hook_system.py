@@ -7,17 +7,31 @@ that can modify, block, redirect, or fulfill requests dynamically.
 """
 
 import asyncio
-import uuid
 import fnmatch
+import types
+import uuid
+from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Dict, List, Any, Callable, Optional, Union
-from dataclasses import dataclass, asdict
+from typing import Any, Callable, Dict, List, Optional
+
 import nodriver as uc
+
 from debug_logger import debug_logger
-import ast
-import sys
-from io import StringIO
-import contextlib
+
+HOOK_FNMATCH = types.SimpleNamespace(fnmatch=fnmatch.fnmatch, fnmatchcase=fnmatch.fnmatchcase)
+
+
+def split_alternatives(value: Any) -> List[str]:
+    """
+    Split a requirement written as pipe-separated alternatives.
+
+    Args:
+        value (Any): Requirement value such as "*ads*|*tracking*" or "GET|POST".
+
+    Returns:
+        List[str]: Non-empty, stripped alternatives.
+    """
+    return [part.strip() for part in str(value).split('|') if part.strip()]
 
 
 @dataclass
@@ -31,13 +45,13 @@ class RequestInfo:
     post_data: Optional[str] = None
     resource_type: Optional[str] = None
     stage: str = "request"  # "request" or "response"
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for AI function processing."""
         return asdict(self)
 
 
-@dataclass 
+@dataclass
 class HookAction:
     """Action returned by hook functions."""
     action: str  # "continue", "block", "redirect", "fulfill", "modify"
@@ -51,8 +65,8 @@ class HookAction:
 
 class DynamicHook:
     """A dynamic hook with AI-generated function."""
-    
-    def __init__(self, hook_id: str, name: str, requirements: Dict[str, Any], 
+
+    def __init__(self, hook_id: str, name: str, requirements: Dict[str, Any],
                  function_code: str, priority: int = 100):
         self.hook_id = hook_id
         self.name = name
@@ -64,93 +78,106 @@ class DynamicHook:
         self.last_triggered: Optional[datetime] = None
         self.status = "active"
         self.request_stage = requirements.get('stage', 'request')  # 'request' or 'response'
-        
+
         self._compiled_function = self._compile_function()
-        
+
     def _compile_function(self) -> Callable:
-        """Compile the AI-generated function."""
-        try:
-            namespace = {
-                'HookAction': HookAction,
-                'datetime': datetime,
-                'fnmatch': fnmatch,
-                '__builtins__': {
-                    'len': len, 'str': str, 'int': int, 'float': float,
-                    'bool': bool, 'dict': dict, 'list': list, 'tuple': tuple,
-                    'print': lambda *args: debug_logger.log_info("hook_function", self.name, " ".join(map(str, args)))
-                }
+        """
+        Compile the AI-generated function.
+
+        The namespace limits the names hook code can reach, but it is not a
+        security sandbox. Hooks run in the server process and must only come
+        from trusted MCP clients.
+
+        Returns:
+            Callable: The compiled process_request function.
+
+        Raises:
+            ValueError: If the code does not compile or does not define process_request.
+        """
+        namespace = {
+            'HookAction': HookAction,
+            'datetime': datetime,
+            'fnmatch': HOOK_FNMATCH,
+            '__builtins__': {
+                'len': len, 'str': str, 'int': int, 'float': float,
+                'bool': bool, 'dict': dict, 'list': list, 'tuple': tuple,
+                'any': any, 'all': all, 'min': min, 'max': max,
+                'print': lambda *args: debug_logger.log_info("hook_function", self.name, " ".join(map(str, args)))
             }
-            
+        }
+        try:
             exec(self.function_code, namespace)
-            
-            if 'process_request' not in namespace:
-                raise ValueError("Function must define 'process_request(request)'")
-                
-            return namespace['process_request']
-            
         except Exception as e:
             debug_logger.log_error("dynamic_hook", "compile_function", f"Failed to compile function for hook {self.name}: {e}")
-            return lambda request: HookAction(action="continue")
-    
+            raise ValueError(f"Hook function failed to compile: {e}") from e
+
+        if not callable(namespace.get('process_request')):
+            raise ValueError("Function must define 'process_request(request)'")
+        return namespace['process_request']
+
     def matches(self, request: RequestInfo) -> bool:
         """Check if this hook matches the request."""
         try:
             # Check URL pattern
             if 'url_pattern' in self.requirements:
-                if not fnmatch.fnmatch(request.url, self.requirements['url_pattern']):
+                patterns = split_alternatives(self.requirements['url_pattern'])
+                if not any(fnmatch.fnmatch(request.url, pattern) for pattern in patterns):
                     return False
-            
+
             # Check method
             if 'method' in self.requirements:
-                if request.method.upper() != self.requirements['method'].upper():
+                methods = {method.upper() for method in split_alternatives(self.requirements['method'])}
+                if request.method.upper() not in methods:
                     return False
-            
+
             # Check resource type
             if 'resource_type' in self.requirements:
-                if request.resource_type != self.requirements['resource_type']:
+                if str(request.resource_type or '').lower() != str(self.requirements['resource_type']).lower():
                     return False
-            
+
             # Check stage
             if 'stage' in self.requirements:
                 if request.stage != self.requirements['stage']:
                     return False
-            
+
             # Check custom conditions (if any)
             if 'custom_condition' in self.requirements:
                 condition_code = self.requirements['custom_condition']
-                namespace = {'request': request, '__builtins__': {'len': len, 'str': str}}
+                namespace = {'request': request.to_dict(), '__builtins__': {'len': len, 'str': str, 'any': any, 'all': all}}
                 try:
                     result = eval(condition_code, namespace)
                     if not result:
                         return False
-                except:
+                except Exception as e:
+                    debug_logger.log_warning("dynamic_hook", "matches", f"Custom condition failed for hook {self.name}: {e}")
                     return False
-            
+
             return True
-            
+
         except Exception as e:
             debug_logger.log_error("dynamic_hook", "matches", f"Error matching hook {self.name}: {e}")
             return False
-    
+
     def process(self, request: RequestInfo) -> HookAction:
         """Execute the hook function."""
         try:
             self.trigger_count += 1
             self.last_triggered = datetime.now()
-            
+
             debug_logger.log_info("dynamic_hook", "process", f"Processing request {request.url} with hook {self.name}")
-            
+
             result = self._compiled_function(request.to_dict())
-            
+
             if isinstance(result, dict):
                 result = HookAction(**result)
             elif not isinstance(result, HookAction):
                 debug_logger.log_error("dynamic_hook", "process", f"Hook {self.name} returned invalid type: {type(result)}")
                 return HookAction(action="continue")
-            
+
             debug_logger.log_info("dynamic_hook", "process", f"Hook {self.name} returned action: {result.action}")
             return result
-            
+
         except Exception as e:
             debug_logger.log_error("dynamic_hook", "process", f"Error executing hook {self.name}: {e}")
             return HookAction(action="continue")
@@ -158,101 +185,165 @@ class DynamicHook:
 
 class DynamicHookSystem:
     """Real-time dynamic hook processing system."""
-    
+
     def __init__(self):
         self.hooks: Dict[str, DynamicHook] = {}
         self.instance_hooks: Dict[str, List[str]] = {}  # instance_id -> list of hook_ids
         self._lock = asyncio.Lock()
         self._request_tasks: Dict[str, set[asyncio.Task]] = {}
         self._interception_handlers: Dict[str, tuple[Any, Callable]] = {}
-    
+        self._instance_tabs: Dict[str, Any] = {}
+        self._fetch_enabled: set[str] = set()
+
+    def _hooks_for_instance(self, instance_id: str) -> List[DynamicHook]:
+        """
+        Active hooks that apply to an instance.
+
+        Args:
+            instance_id (str): Browser instance ID.
+
+        Returns:
+            List[DynamicHook]: Instance-specific hooks followed by global hooks.
+        """
+        instance_hook_ids = self.instance_hooks.get(instance_id, [])
+        hooks = [
+            self.hooks[hook_id]
+            for hook_id in instance_hook_ids
+            if hook_id in self.hooks and self.hooks[hook_id].status == "active"
+        ]
+        hooks.extend(
+            hook
+            for hook_id, hook in self.hooks.items()
+            if hook.status == "active" and hook_id not in instance_hook_ids and not hook.instance_ids
+        )
+        return hooks
+
+    @staticmethod
+    def _request_patterns(hooks: List[DynamicHook]) -> List[Any]:
+        """
+        Build Fetch request patterns for a set of hooks.
+
+        Args:
+            hooks (List[DynamicHook]): Hooks to intercept for.
+
+        Returns:
+            List[Any]: Fetch.RequestPattern objects, request stage first.
+        """
+        request_patterns = []
+        response_patterns = []
+        for hook in hooks:
+            resource_type = hook.requirements.get('resource_type')
+            cdp_resource_type = getattr(uc.cdp.network.ResourceType, resource_type.upper()) if resource_type else None
+            is_response = hook.request_stage == 'response'
+            stage = uc.cdp.fetch.RequestStage.RESPONSE if is_response else uc.cdp.fetch.RequestStage.REQUEST
+            target = response_patterns if is_response else request_patterns
+            for url_pattern in split_alternatives(hook.requirements.get('url_pattern', '*')) or ['*']:
+                target.append(uc.cdp.fetch.RequestPattern(
+                    url_pattern=url_pattern,
+                    resource_type=cdp_resource_type,
+                    request_stage=stage
+                ))
+        return request_patterns + response_patterns
+
     async def setup_interception(self, tab, instance_id: str):
-        """Set up request and response interception for a browser tab."""
+        """
+        Attach an instance tab to the hook system.
+
+        Interception is enabled only while at least one active hook applies to
+        the instance, so pages without hooks load without a Fetch round trip
+        per request.
+
+        Args:
+            tab (Any): Browser tab for the instance.
+            instance_id (str): Browser instance ID.
+        """
+        previous_tab = self._instance_tabs.get(instance_id)
+        if previous_tab is not None and previous_tab is not tab:
+            self._remove_request_handler(instance_id)
+            self._fetch_enabled.discard(instance_id)
+        self._instance_tabs[instance_id] = tab
+        await self.refresh_interception(instance_id)
+
+    async def refresh_interception(self, instance_id: str) -> None:
+        """
+        Enable, update, or disable Fetch interception to match the current hooks.
+
+        Args:
+            instance_id (str): Browser instance ID.
+        """
+        tab = self._instance_tabs.get(instance_id)
+        if tab is None:
+            return
         try:
-            all_hooks = []
-            
-            instance_hook_ids = self.instance_hooks.get(instance_id, [])
-            for hook_id in instance_hook_ids:
-                hook = self.hooks.get(hook_id)
-                if hook and hook.status == "active":
-                    all_hooks.append(hook)
-            
-            for hook_id, hook in self.hooks.items():
-                if hook.status == "active" and hook_id not in instance_hook_ids:
-                    if not hasattr(hook, 'instance_ids') or not hook.instance_ids:
-                        all_hooks.append(hook)
-            
-            request_patterns = []
-            response_patterns = []
-            
-            for hook in all_hooks:
-                url_pattern = hook.requirements.get('url_pattern', '*')
-                resource_type = hook.requirements.get('resource_type')
-                stage = hook.request_stage
-                
-                if stage == 'response':
-                    pattern = uc.cdp.fetch.RequestPattern(
-                        url_pattern=url_pattern,
-                        resource_type=getattr(uc.cdp.network.ResourceType, resource_type.upper()) if resource_type else None,
-                        request_stage=uc.cdp.fetch.RequestStage.RESPONSE
-                    )
-                    response_patterns.append(pattern)
-                else:
-                    pattern = uc.cdp.fetch.RequestPattern(
-                        url_pattern=url_pattern,
-                        resource_type=getattr(uc.cdp.network.ResourceType, resource_type.upper()) if resource_type else None,
-                        request_stage=uc.cdp.fetch.RequestStage.REQUEST
-                    )
-                    request_patterns.append(pattern)
-            
-            all_patterns = request_patterns + response_patterns
-            
-            if not all_patterns:
-                all_patterns = [
-                    uc.cdp.fetch.RequestPattern(url_pattern='*', request_stage=uc.cdp.fetch.RequestStage.REQUEST),
-                    uc.cdp.fetch.RequestPattern(url_pattern='*', request_stage=uc.cdp.fetch.RequestStage.RESPONSE)
-                ]
-            
-            await tab.send(uc.cdp.fetch.enable(patterns=all_patterns))
-            
-            def schedule_request(event):
-                task = asyncio.create_task(
-                    self._on_request_paused(tab, event, instance_id)
-                )
-                tasks = self._request_tasks.setdefault(instance_id, set())
-                tasks.add(task)
-                task.add_done_callback(tasks.discard)
+            patterns = self._request_patterns(self._hooks_for_instance(instance_id))
+            if not patterns:
+                self._remove_request_handler(instance_id)
+                if instance_id in self._fetch_enabled:
+                    self._fetch_enabled.discard(instance_id)
+                    await tab.send(uc.cdp.fetch.disable())
+                return
 
-            previous = self._interception_handlers.pop(instance_id, None)
-            if previous:
-                previous_tab, previous_handler = previous
-                try:
-                    previous_tab.remove_handler(
-                        uc.cdp.fetch.RequestPaused,
-                        previous_handler,
+            await tab.send(uc.cdp.fetch.enable(patterns=patterns))
+            self._fetch_enabled.add(instance_id)
+            if instance_id not in self._interception_handlers:
+                def schedule_request(event):
+                    task = asyncio.create_task(
+                        self._on_request_paused(tab, event, instance_id)
                     )
-                except Exception:
-                    pass
+                    tasks = self._request_tasks.setdefault(instance_id, set())
+                    tasks.add(task)
+                    task.add_done_callback(tasks.discard)
 
-            tab.add_handler(uc.cdp.fetch.RequestPaused, schedule_request)
-            self._interception_handlers[instance_id] = (tab, schedule_request)
-            
-            debug_logger.log_info("dynamic_hook_system", "setup_interception", f"Set up interception for instance {instance_id} with {len(all_patterns)} patterns ({len(request_patterns)} request, {len(response_patterns)} response)")
-            
+                tab.add_handler(uc.cdp.fetch.RequestPaused, schedule_request)
+                self._interception_handlers[instance_id] = (tab, schedule_request)
+
+            debug_logger.log_info("dynamic_hook_system", "refresh_interception", f"Intercepting {len(patterns)} patterns for instance {instance_id}")
         except Exception as e:
-            debug_logger.log_error("dynamic_hook_system", "setup_interception", f"Failed to setup interception: {e}")
-    
+            debug_logger.log_error("dynamic_hook_system", "refresh_interception", f"Failed to update interception: {e}")
+
+    async def _refresh_instances(self, instance_ids: Optional[List[str]] = None) -> None:
+        """
+        Refresh interception for several instances.
+
+        Args:
+            instance_ids (Optional[List[str]]): Instances to refresh, or None for all attached instances.
+        """
+        targets = list(instance_ids) if instance_ids else list(self._instance_tabs)
+        for instance_id in targets:
+            await self.refresh_interception(instance_id)
+
+    def _remove_request_handler(self, instance_id: str) -> None:
+        """
+        Remove the RequestPaused handler for an instance.
+
+        Removes only this handler, because nodriver's remove_handler drops
+        every handler registered for the event type.
+
+        Args:
+            instance_id (str): Browser instance ID.
+        """
+        handler_entry = self._interception_handlers.pop(instance_id, None)
+        if not handler_entry:
+            return
+        tab, handler = handler_entry
+        handlers = getattr(tab, "handlers", {})
+        callbacks = handlers.get(uc.cdp.fetch.RequestPaused)
+        if callbacks and handler in callbacks:
+            callbacks.remove(handler)
+        if not callbacks:
+            handlers.pop(uc.cdp.fetch.RequestPaused, None)
+
     async def _on_request_paused(self, tab, event, instance_id: str):
         """Handle intercepted requests and responses - process hooks immediately."""
         try:
             # Determine if this is request stage or response stage
-            # According to nodriver docs: "The stage of the request can be determined by presence of responseErrorReason 
+            # According to nodriver docs: "The stage of the request can be determined by presence of responseErrorReason
             # and responseStatusCode -- the request is at the response stage if either of these fields is present"
             is_response_stage = (hasattr(event, 'response_status_code') and event.response_status_code is not None) or \
                                (hasattr(event, 'response_error_reason') and event.response_error_reason is not None)
-            
+
             stage = "response" if is_response_stage else "request"
-            
+
             request = RequestInfo(
                 request_id=str(event.request_id),
                 instance_id=instance_id,
@@ -260,37 +351,42 @@ class DynamicHookSystem:
                 method=event.request.method,
                 headers=dict(event.request.headers) if hasattr(event.request, 'headers') else {},
                 post_data=event.request.post_data if hasattr(event.request, 'post_data') else None,
-                resource_type=str(event.resource_type) if hasattr(event, 'resource_type') else None,
+                resource_type=event.resource_type.value if getattr(event, 'resource_type', None) else None,
                 stage=stage
             )
-            
+
             debug_logger.log_info("dynamic_hook_system", "_on_request_paused", f"Intercepted {stage}: {request.method} {request.url}")
-            
+
             if is_response_stage and hasattr(event, 'response_status_code'):
                 debug_logger.log_info("dynamic_hook_system", "_on_request_paused", f"Response status: {event.response_status_code}")
-            
+
             await self._process_request_hooks(tab, request, event)
-            
+
         except Exception as e:
             debug_logger.log_error("dynamic_hook_system", "_on_request_paused", f"Error processing {stage if 'stage' in locals() else 'request'}: {e}")
             try:
                 await tab.send(uc.cdp.fetch.continue_request(request_id=event.request_id))
             except:
                 pass
-    
+
     async def _process_request_hooks(self, tab, request: RequestInfo, event=None):
         """Process hooks for a request/response in real-time with priority chain processing."""
         try:
-            instance_hook_ids = self.instance_hooks.get(request.instance_id, [])
-            
+            candidate_ids = list(self.instance_hooks.get(request.instance_id, []))
+            candidate_ids.extend(
+                hook_id
+                for hook_id, hook in self.hooks.items()
+                if not getattr(hook, 'instance_ids', None) and hook_id not in candidate_ids
+            )
+
             matching_hooks = []
-            for hook_id in instance_hook_ids:
+            for hook_id in candidate_ids:
                 hook = self.hooks.get(hook_id)
                 if hook and hook.status == "active" and hook.request_stage == request.stage and hook.matches(request):
                     matching_hooks.append(hook)
-            
+
             matching_hooks.sort(key=lambda h: h.priority)
-            
+
             if not matching_hooks:
                 debug_logger.log_info("dynamic_hook_system", "_process_request_hooks", f"No matching hooks for {request.stage} stage: {request.url}")
                 if request.stage == "response":
@@ -298,9 +394,9 @@ class DynamicHookSystem:
                 else:
                     await tab.send(uc.cdp.fetch.continue_request(request_id=uc.cdp.fetch.RequestId(request.request_id)))
                 return
-            
+
             debug_logger.log_info("dynamic_hook_system", "_process_request_hooks", f"Found {len(matching_hooks)} matching hooks for {request.stage} stage: {request.url}")
-            
+
             response_body = None
             if request.stage == "response" and event:
                 try:
@@ -309,39 +405,30 @@ class DynamicHookSystem:
                     debug_logger.log_info("dynamic_hook_system", "_process_request_hooks", f"Retrieved response body ({len(response_body)} chars)")
                 except Exception as e:
                     debug_logger.log_error("dynamic_hook_system", "_process_request_hooks", f"Failed to get response body: {e}")
-            
+
             hook = matching_hooks[0]
-            
+
             request_data = request.to_dict()
             if response_body:
                 request_data['response_body'] = response_body
                 request_data['response_status_code'] = getattr(event, 'response_status_code', None)
                 response_headers = {}
-                if hasattr(event, 'response_headers') and event.response_headers:
-                    try:
-                        if isinstance(event.response_headers, dict):
-                            response_headers = event.response_headers
-                        elif hasattr(event.response_headers, 'items'):
-                            for header in event.response_headers:
-                                if hasattr(header, 'name') and hasattr(header, 'value'):
-                                    response_headers[header.name] = header.value
-                        else:
-                            response_headers = {}
-                    except Exception:
-                        response_headers = {}
+                for header in getattr(event, 'response_headers', None) or []:
+                    if hasattr(header, 'name') and hasattr(header, 'value'):
+                        response_headers[header.name] = header.value
                 request_data['response_headers'] = response_headers
-            
+
             action = hook._compiled_function(request_data)
             if isinstance(action, dict):
                 action = HookAction(**action)
-            
+
             hook.trigger_count += 1
             hook.last_triggered = datetime.now()
-            
+
             debug_logger.log_info("dynamic_hook_system", "_process_request_hooks", f"Hook {hook.name} returned action: {action.action}")
-            
+
             await self._execute_hook_action(tab, request, action, event if request.stage == "response" else None)
-            
+
         except Exception as e:
             debug_logger.log_error("dynamic_hook_system", "_process_request_hooks", f"Error processing hooks: {e}")
             try:
@@ -351,16 +438,12 @@ class DynamicHookSystem:
                     await tab.send(uc.cdp.fetch.continue_request(request_id=uc.cdp.fetch.RequestId(request.request_id)))
             except:
                 pass
-    
+
     def _detach_instance(self, instance_id: str) -> List[asyncio.Task]:
         """Detach interception and cancel pending request tasks for an instance."""
-        handler_entry = self._interception_handlers.pop(instance_id, None)
-        if handler_entry:
-            tab, handler = handler_entry
-            try:
-                tab.remove_handler(uc.cdp.fetch.RequestPaused, handler)
-            except Exception:
-                pass
+        self._remove_request_handler(instance_id)
+        self._instance_tabs.pop(instance_id, None)
+        self._fetch_enabled.discard(instance_id)
 
         tasks = list(self._request_tasks.pop(instance_id, set()))
         for task in tasks:
@@ -380,16 +463,17 @@ class DynamicHookSystem:
         """Cancel dynamic-hook work during forced synchronous cleanup."""
         self._detach_instance(instance_id)
 
-    async def create_hook(self, name: str, requirements: Dict[str, Any], function_code: str, 
+    async def create_hook(self, name: str, requirements: Dict[str, Any], function_code: str,
                          instance_ids: Optional[List[str]] = None, priority: int = 100) -> str:
         """Create a new dynamic hook."""
         try:
             hook_id = str(uuid.uuid4())
             hook = DynamicHook(hook_id, name, requirements, function_code, priority)
-            
+            hook.instance_ids = list(instance_ids or [])
+
             async with self._lock:
                 self.hooks[hook_id] = hook
-                
+
                 if instance_ids:
                     for instance_id in instance_ids:
                         if instance_id not in self.instance_hooks:
@@ -398,14 +482,15 @@ class DynamicHookSystem:
                 else:
                     for instance_id in self.instance_hooks:
                         self.instance_hooks[instance_id].append(hook_id)
-            
+
+            await self._refresh_instances(hook.instance_ids or None)
             debug_logger.log_info("dynamic_hook_system", "create_hook", f"Created hook {name} with ID {hook_id}")
             return hook_id
-            
+
         except Exception as e:
             debug_logger.log_error("dynamic_hook_system", "create_hook", f"Failed to create hook {name}: {e}")
             raise
-    
+
     def list_hooks(self) -> List[Dict[str, Any]]:
         """List all hooks."""
         return [
@@ -421,13 +506,13 @@ class DynamicHookSystem:
             }
             for hook in self.hooks.values()
         ]
-    
+
     def get_hook_details(self, hook_id: str) -> Optional[Dict[str, Any]]:
         """Get detailed hook information."""
         hook = self.hooks.get(hook_id)
         if not hook:
             return None
-        
+
         return {
             "hook_id": hook.hook_id,
             "name": hook.name,
@@ -439,54 +524,58 @@ class DynamicHookSystem:
             "last_triggered": hook.last_triggered.isoformat() if hook.last_triggered else None,
             "created_at": hook.created_at.isoformat()
         }
-    
+
     async def remove_hook(self, hook_id: str) -> bool:
         """Remove a hook."""
         try:
             async with self._lock:
                 if hook_id in self.hooks:
                     del self.hooks[hook_id]
-                    
+
                     for instance_id in self.instance_hooks:
                         if hook_id in self.instance_hooks[instance_id]:
                             self.instance_hooks[instance_id].remove(hook_id)
-                    
+
                     debug_logger.log_info("dynamic_hook_system", "remove_hook", f"Removed hook {hook_id}")
-                    return True
-            
-            return False
-            
+                    removed = True
+                else:
+                    removed = False
+
+            if removed:
+                await self._refresh_instances()
+            return removed
+
         except Exception as e:
             debug_logger.log_error("dynamic_hook_system", "remove_hook", f"Failed to remove hook {hook_id}: {e}")
             return False
-    
+
     def add_instance(self, instance_id: str):
         """Add a new browser instance."""
         if instance_id not in self.instance_hooks:
             self.instance_hooks[instance_id] = []
-    
+
     async def _execute_hook_action(self, tab, request: RequestInfo, action: HookAction, event=None):
         """Execute a hook action for either request or response stage."""
         try:
             request_id = uc.cdp.fetch.RequestId(request.request_id)
-            
+
             if action.action == "block":
                 await tab.send(uc.cdp.fetch.fail_request(
                     request_id=request_id,
                     error_reason=uc.cdp.network.ErrorReason.BLOCKED_BY_CLIENT
                 ))
                 debug_logger.log_info("dynamic_hook_system", "_execute_hook_action", f"Blocked {request.stage} {request.url}")
-            
+
             elif action.action == "fulfill":
                 headers = []
                 if action.headers:
                     for name, value in action.headers.items():
                         headers.append(uc.cdp.fetch.HeaderEntry(name=name, value=value))
-                
+
                 import base64
                 body_bytes = (action.body or "").encode('utf-8')
                 body_base64 = base64.b64encode(body_bytes).decode('ascii')
-                
+
                 await tab.send(uc.cdp.fetch.fulfill_request(
                     request_id=request_id,
                     response_code=action.status_code or 200,
@@ -494,21 +583,21 @@ class DynamicHookSystem:
                     body=body_base64
                 ))
                 debug_logger.log_info("dynamic_hook_system", "_execute_hook_action", f"Fulfilled {request.stage} {request.url}")
-            
+
             elif action.action == "redirect" and request.stage == "request":
                 await tab.send(uc.cdp.fetch.continue_request(
                     request_id=request_id,
                     url=action.url
                 ))
                 debug_logger.log_info("dynamic_hook_system", "_execute_hook_action", f"Redirected request {request.url} to {action.url}")
-            
+
             elif action.action == "modify":
                 if request.stage == "response":
                     response_headers = []
                     if action.headers:
                         for name, value in action.headers.items():
                             response_headers.append(uc.cdp.fetch.HeaderEntry(name=name, value=value))
-                    
+
                     await tab.send(uc.cdp.fetch.continue_response(
                         request_id=request_id,
                         response_code=action.status_code,
@@ -520,7 +609,7 @@ class DynamicHookSystem:
                     if action.headers:
                         for name, value in action.headers.items():
                             headers.append(uc.cdp.fetch.HeaderEntry(name=name, value=value))
-                    
+
                     await tab.send(uc.cdp.fetch.continue_request(
                         request_id=request_id,
                         url=action.url or request.url,
@@ -529,7 +618,7 @@ class DynamicHookSystem:
                         post_data=action.post_data
                     ))
                     debug_logger.log_info("dynamic_hook_system", "_execute_hook_action", f"Modified request {request.url}")
-            
+
             else:
                 if request.stage == "response":
                     await tab.send(uc.cdp.fetch.continue_response(request_id=request_id))
@@ -537,7 +626,7 @@ class DynamicHookSystem:
                 else:
                     await tab.send(uc.cdp.fetch.continue_request(request_id=request_id))
                     debug_logger.log_info("dynamic_hook_system", "_execute_hook_action", f"Continued request {request.url}")
-                
+
         except Exception as e:
             debug_logger.log_error("dynamic_hook_system", "_execute_hook_action", f"Error executing {request.stage} action: {e}")
             try:

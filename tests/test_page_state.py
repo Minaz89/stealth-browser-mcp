@@ -122,9 +122,9 @@ class CookiesToDictsTests(unittest.TestCase):
 
 
 class GetPageStateTests(unittest.TestCase):
-    def test_page_state_with_cookie_dataclasses(self):
-        cookie = uc.cdp.network.Cookie.from_json(SAMPLE_COOKIE_JSON)
-        manager = _manager_with_tab(FakeTab([cookie]))
+    def test_page_state_with_current_chrome_cookie_shape(self):
+        cookie = {key: value for key, value in SAMPLE_COOKIE_JSON.items() if key != "sameParty"}
+        manager = _manager_with_tab(FakeTab({"cookies": [cookie]}))
 
         state = asyncio.run(manager.get_page_state("instance-1"))
 

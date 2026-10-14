@@ -11,7 +11,7 @@ import ast
 
 class HookLearningSystem:
     """System to help AI learn how to create hook functions."""
-    
+
     @staticmethod
     def get_request_object_documentation() -> Dict[str, Any]:
         """Get comprehensive documentation of the request object structure."""
@@ -26,7 +26,7 @@ class HookLearningSystem:
                         "example": "fetch-12345-abcde"
                     },
                     "instance_id": {
-                        "type": "str", 
+                        "type": "str",
                         "description": "Browser instance ID that made the request",
                         "example": "8e226b0c-3879-4d5e-96b3-db1805bfd4c4"
                     },
@@ -96,8 +96,8 @@ class HookLearningSystem:
                 }
             }
         }
-    
-    @staticmethod 
+
+    @staticmethod
     def get_hook_examples() -> List[Dict[str, Any]]:
         """Get example hook functions for AI learning."""
         return [
@@ -139,7 +139,7 @@ def process_request(request):
     new_headers = request["headers"].copy()
     new_headers["X-API-Key"] = "secret-api-key-123"
     new_headers["X-Custom-Client"] = "Browser-Hook-System"
-    
+
     return HookAction(
         action="modify",
         headers=new_headers
@@ -170,7 +170,7 @@ def process_request(request):
                 "explanation": "This hook converts GET requests to POST, adds JSON content-type header, and includes original URL in body."
             },
             {
-                "name": "Custom Response Generator", 
+                "name": "Custom Response Generator",
                 "description": "Return custom JSON response for API endpoints",
                 "requirements": {
                     "url_pattern": "*/mock-api/*"
@@ -186,7 +186,7 @@ def process_request(request):
             "timestamp": datetime.now().isoformat()
         }
     }
-    
+
     return HookAction(
         action="fulfill",
         status_code=200,
@@ -206,16 +206,16 @@ def process_request(request):
 def process_request(request):
     # Block requests to social media trackers during work hours
     social_trackers = ["facebook.com", "twitter.com", "linkedin.com", "instagram.com"]
-    
+
     # Check if URL contains social tracker
     is_social_tracker = any(tracker in request["url"] for tracker in social_trackers)
-    
+
     # Check if it's tracking related
     is_tracker = "/track" in request["url"] or "/analytics" in request["url"]
-    
+
     if is_social_tracker and is_tracker:
         return HookAction(action="block")
-    
+
     # Otherwise continue normally
     return HookAction(action="continue")
 ''',
@@ -230,14 +230,14 @@ def process_request(request):
                 "function": '''
 def process_request(request):
     original_url = request["url"]
-    
+
     # Replace domain but keep path and parameters
     new_url = original_url.replace("old-domain.com", "new-domain.com")
-    
+
     # Add cache-busting parameter
     separator = "&" if "?" in new_url else "?"
     new_url += f"{separator}cache_bust=hook_modified"
-    
+
     return HookAction(action="redirect", url=new_url)
 ''',
                 "explanation": "This hook rewrites URLs by replacing domains and adding parameters, useful for domain migrations."
@@ -252,11 +252,11 @@ def process_request(request):
 def process_request(request):
     # Log important API calls for debugging
     print(f"[API LOG] {request['method']} {request['url']}")
-    
+
     # Log headers if they contain auth info
     if "authorization" in str(request["headers"]).lower():
         print(f"[API LOG] Has Authorization header")
-    
+
     # Always continue the request
     return HookAction(action="continue")
 ''',
@@ -278,9 +278,9 @@ def process_request(request):
         "X-CSRF-Protection": "enabled",
         "X-Custom-Security": "browser-hook-system"
     })
-    
+
     return HookAction(
-        action="modify", 
+        action="modify",
         headers=security_headers
     )
 ''',
@@ -296,7 +296,7 @@ def process_request(request):
 def process_request(request):
     # Simulate slow API by returning custom response immediately
     # (In real implementation, you'd add actual delays)
-    
+
     return HookAction(
         action="fulfill",
         status_code=200,
@@ -318,10 +318,10 @@ def process_request(request):
     # Only process responses (not requests)
     if request.get("stage") != "response":
         return HookAction(action="continue")
-    
+
     # Get response body
     response_body = request.get("response_body", "")
-    
+
     if "user_data" in response_body:
         # Replace sensitive data in API responses
         modified_body = response_body.replace(
@@ -329,14 +329,14 @@ def process_request(request):
         ).replace(
             '"phone":', '"phone_redacted":'
         )
-        
+
         return HookAction(
             action="fulfill",
             status_code=200,
             headers={"Content-Type": "application/json"},
             body=modified_body
         )
-    
+
     # Continue normally if no modification needed
     return HookAction(action="continue")
 ''',
@@ -354,19 +354,19 @@ def process_request(request):
     # Only process responses
     if request.get("stage") != "response":
         return HookAction(action="continue")
-    
+
     # Add security headers to all responses
     security_headers = {
         "X-Content-Type-Options": "nosniff",
-        "X-Frame-Options": "DENY", 
+        "X-Frame-Options": "DENY",
         "X-XSS-Protection": "1; mode=block",
         "Strict-Transport-Security": "max-age=31536000"
     }
-    
+
     # Merge with existing headers
     current_headers = request.get("response_headers", {})
     merged_headers = {**current_headers, **security_headers}
-    
+
     return HookAction(
         action="modify",
         headers=merged_headers
@@ -386,7 +386,7 @@ def process_request(request):
     # Only process responses
     if request.get("stage") != "response":
         return HookAction(action="continue")
-    
+
     # Generate fake user data for testing
     fake_response = {
         "users": [
@@ -397,7 +397,7 @@ def process_request(request):
         "total": 3,
         "fake": True
     }
-    
+
     return HookAction(
         action="fulfill",
         status_code=200,
@@ -408,7 +408,7 @@ def process_request(request):
                 "explanation": "This response-stage hook replaces real API responses with fake data for testing environments."
             }
         ]
-    
+
     @staticmethod
     def get_requirements_documentation() -> Dict[str, Any]:
         """Get documentation on hook requirements/matching criteria."""
@@ -428,7 +428,7 @@ def process_request(request):
                         ]
                     },
                     "method": {
-                        "type": "str", 
+                        "type": "str",
                         "description": "HTTP method to match (GET, POST, PUT, DELETE, etc.)",
                         "examples": ["GET", "POST", "PUT", "DELETE"]
                     },
@@ -457,7 +457,7 @@ def process_request(request):
             },
             "best_practices": [
                 "Use specific URL patterns to avoid over-matching",
-                "Include method filters for POST/PUT hooks to avoid affecting GET requests", 
+                "Include method filters for POST/PUT hooks to avoid affecting GET requests",
                 "Use custom conditions for complex matching logic",
                 "Test hooks with console logging before deploying",
                 "Always return a HookAction object",
@@ -465,7 +465,7 @@ def process_request(request):
                 "Use priority (lower = higher priority) to control hook execution order"
             ]
         }
-    
+
     @staticmethod
     def get_common_patterns() -> List[Dict[str, Any]]:
         """Get common hook patterns and use cases."""
@@ -477,7 +477,7 @@ def process_request(request):
                 "use_case": "Block advertising and tracking requests"
             },
             {
-                "pattern": "API Proxy", 
+                "pattern": "API Proxy",
                 "requirements": {"url_pattern": "*api.old-site.com*"},
                 "action": "redirect",
                 "use_case": "Redirect API calls to new endpoints"
@@ -491,7 +491,7 @@ def process_request(request):
             {
                 "pattern": "Mock Server",
                 "requirements": {"url_pattern": "*mock/*"},
-                "action": "fulfill", 
+                "action": "fulfill",
                 "use_case": "Return custom responses for testing"
             },
             {
@@ -507,47 +507,45 @@ def process_request(request):
                 "use_case": "Add security headers to modification requests"
             }
         ]
-    
+
     @staticmethod
     def validate_hook_function(function_code: str) -> Dict[str, Any]:
         """Validate hook function code for common issues."""
         issues = []
         warnings = []
-        
+
         try:
             # Parse the function code
             parsed = ast.parse(function_code)
-            
+
             # Check for required function
             has_process_request = False
             for node in ast.walk(parsed):
                 if isinstance(node, ast.FunctionDef) and node.name == "process_request":
                     has_process_request = True
-                    
+
                     # Check function parameters
                     if len(node.args.args) != 1:
                         issues.append("process_request function must take exactly one parameter (request)")
                     elif node.args.args[0].arg != "request":
                         warnings.append("First parameter should be named 'request' for clarity")
-            
+
             if not has_process_request:
                 issues.append("Function must define 'process_request(request)' function")
-            
-            # Check for dangerous operations
-            dangerous_nodes = []
+
             for node in ast.walk(parsed):
                 if isinstance(node, ast.Import) or isinstance(node, ast.ImportFrom):
                     warnings.append(f"Imports may not work in hook context: {ast.dump(node)}")
                 elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
                     if node.func.id in ['eval', 'exec', 'open', 'input']:
                         issues.append(f"Dangerous function call: {node.func.id}")
-            
+
             return {
                 "valid": len(issues) == 0,
                 "issues": issues,
                 "warnings": warnings
             }
-            
+
         except SyntaxError as e:
             return {
                 "valid": False,
@@ -556,7 +554,7 @@ def process_request(request):
             }
         except Exception as e:
             return {
-                "valid": False, 
+                "valid": False,
                 "issues": [f"Parse error: {e}"],
                 "warnings": []
             }

@@ -12,8 +12,7 @@ Read [README.md](README.md) first for project overview, features, and setup.
 ## Recommended Proxy Services
 
 This project is sponsored by:
-- [NodeMaven](https://go.nodemaven.com/stealthbrowsermcpagentaugust) — The most efficient proxy provider for Web Scraping and Automation with the Highest Quality IP on the market. Features: ZIP targeting, 99.9% uptime, IP filtering (fraud score <97%), no KYC, free tools (Proxy Bandwidth Checker, Meta Tag Checker, IP Lookup). Use discount code `STEALTHMCP35` for 35% off Mobile and Residential Proxies or `STEALTHMCP40` for 40% off ISP (Static) Proxies.
-- [RapidProxy](https://www.rapidproxy.io/?ref=mcp) — 90M+ residential IPs across 200+ countries with rotation, geo-targeting, and high concurrency. Use promo code `RAPID10` for 10% off.
+- [NodeMaven](https://go.nodemaven.com/stealthbrowsermcpagentseptemb) — The most efficient proxy provider for Web Scraping and Automation with the Highest Quality IP on the market. Features: ZIP targeting, 99.9% uptime, IP filtering (fraud score <97%), no KYC, free tools (Proxy Bandwidth Checker, Meta Tag Checker, IP Lookup). Use discount code `STEALTHMCP35` for 35% off Mobile and Residential Proxies or `STEALTHMCP40` for 40% off ISP (Static) Proxies.
 
 ## Environment
 
@@ -35,6 +34,15 @@ For broader syntax validation:
 ```powershell
 Get-ChildItem src -Filter *.py | ForEach-Object { & .\venv\Scripts\python.exe -m py_compile $_.FullName }
 ```
+
+Unit tests and the stealth benchmark:
+
+```powershell
+& .\venv\Scripts\python.exe -m unittest discover -s tests -v
+& .\venv\Scripts\python.exe -m benchmarks.stealth run --mode headed
+```
+
+Set `STEALTH_BROWSER_TESTS=1` to include tests that launch a real browser. Benchmark results go to `.stealth-results/` locally. Only the weekly workflow writes to `docs/stealth-results/` and regenerates the automated section of `STEALTH_TESTS.md`.
 
 ## Git Rules
 

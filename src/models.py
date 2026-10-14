@@ -1,6 +1,6 @@
 """Data models for browser MCP server."""
 
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
 from pydantic import BaseModel, Field
 from enum import Enum
@@ -78,7 +78,7 @@ class PageState(BaseModel):
     local_storage: Dict[str, str] = Field(default_factory=dict)
     session_storage: Dict[str, str] = Field(default_factory=dict)
     console_logs: List[Dict[str, Any]] = Field(default_factory=list)
-    viewport: Dict[str, int] = Field(default_factory=dict)
+    viewport: Dict[str, Union[int, float]] = Field(default_factory=dict)
     timestamp: datetime = Field(default_factory=datetime.now)
 
 
