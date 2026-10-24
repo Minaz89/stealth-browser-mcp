@@ -76,6 +76,12 @@ class PackageContentsTests(unittest.TestCase):
             server.main(["--list-sections"])
         self.assertEqual(raised.exception.code, 0)
 
+    def test_readme_links_work_on_pypi(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        targets = re.findall(r'(?:src|href)="([^"]+)"', readme) + re.findall(r"\]\(([^)\s]+)\)", readme)
+        relative = [target for target in targets if not target.startswith(("http://", "https://", "mailto:", "#"))]
+        self.assertEqual(relative, [], "PyPI renders the README without the repo, so links must be absolute")
+
     @unittest.skipIf(tomllib is None, "tomllib needs Python 3.11")
     def test_console_script_points_at_main(self):
         project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))

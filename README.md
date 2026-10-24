@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="media/UndetectedStealthBrowser-2.png" alt="Stealth Browser MCP logo" width="200"/>
+<img src="https://raw.githubusercontent.com/vibheksoni/stealth-browser-mcp/master/media/UndetectedStealthBrowser-2.png" alt="Stealth Browser MCP logo" width="200"/>
 
 # Stealth Browser MCP
 
@@ -9,11 +9,11 @@
 Navigate Cloudflare challenges, anti-bot checks, and login walls with real Chrome-family browser instances powered by [nodriver](https://github.com/ultrafunkamsterdam/nodriver), Chrome DevTools Protocol, and [FastMCP](https://github.com/jlowin/fastmcp).
 
 [![MCP](https://img.shields.io/badge/MCP-Compatible-blue?style=flat-square)](https://modelcontextprotocol.io)
-[![Version](https://img.shields.io/badge/version-0.2.5-blue?style=flat-square)](pyproject.toml)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square)](pyproject.toml)
+[![PyPI](https://img.shields.io/pypi/v/browserstealthmcp?style=flat-square)](https://pypi.org/project/browserstealthmcp/)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square)](https://github.com/vibheksoni/stealth-browser-mcp/blob/master/pyproject.toml)
 [![Stars](https://img.shields.io/github/stars/vibheksoni/stealth-browser-mcp?style=flat-square)](https://github.com/vibheksoni/stealth-browser-mcp/stargazers)
-[![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)](CONTRIBUTING.md)
+[![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](https://github.com/vibheksoni/stealth-browser-mcp/blob/master/LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)](https://github.com/vibheksoni/stealth-browser-mcp/blob/master/CONTRIBUTING.md)
 
 </div>
 
@@ -21,7 +21,7 @@ Navigate Cloudflare challenges, anti-bot checks, and login walls with real Chrom
 
 ## Sponsors
 
-<a href="https://go.nodemaven.com/stealthbrowsermcpreadmesept"><img src="media/nodemaven-sponsor.png" alt="NodeMaven" width="100%"></a>
+<a href="https://go.nodemaven.com/stealthbrowsermcpreadmesept"><img src="https://raw.githubusercontent.com/vibheksoni/stealth-browser-mcp/master/media/nodemaven-sponsor.png" alt="NodeMaven" width="100%"></a>
 
 [NodeMaven](https://go.nodemaven.com/stealthbrowsermcpreadmesept) — The most efficient proxy provider for Web Scraping and Automation with the Highest Quality IP on the market.
 
@@ -69,9 +69,9 @@ Navigate Cloudflare challenges, anti-bot checks, and login walls with real Chrom
 ## Demo
 
 <div align="center">
-<img src="media/showcase-demo-full.gif" alt="Stealth Browser MCP demo" width="800" style="border-radius: 8px;">
+<img src="https://raw.githubusercontent.com/vibheksoni/stealth-browser-mcp/master/media/showcase-demo-full.gif" alt="Stealth Browser MCP demo" width="800" style="border-radius: 8px;">
 <br><br>
-<a href="media/Showcase%20Stealth%20Browser%20Mcp.mp4" download>
+<a href="https://raw.githubusercontent.com/vibheksoni/stealth-browser-mcp/master/media/Showcase%20Stealth%20Browser%20Mcp.mp4" download>
   <img src="https://img.shields.io/badge/Watch%20HD%20Video-red?style=for-the-badge&logo=video&logoColor=white" alt="Watch HD Video">
 </a>
 </div>
@@ -549,7 +549,7 @@ client = Client(
 
 ## Stealth vs Playwright MCP
 
-Detection results are point-in-time and depend on site policy, region, browser version, IP reputation, and detector version. See [STEALTH_TESTS.md](STEALTH_TESTS.md) for weekly automated results from the benchmark in `benchmarks/stealth/`, which runs on Linux, Windows, and macOS in GitHub Actions, plus the earlier manual snapshot.
+Detection results are point-in-time and depend on site policy, region, browser version, IP reputation, and detector version. See [STEALTH_TESTS.md](https://github.com/vibheksoni/stealth-browser-mcp/blob/master/STEALTH_TESTS.md) for weekly automated results from the benchmark in `benchmarks/stealth/`, which runs on Linux, Windows, and macOS in GitHub Actions, plus the earlier manual snapshot.
 
 | Feature | Stealth Browser MCP | Playwright MCP |
 |---------|---------------------|----------------|
@@ -613,24 +613,24 @@ All driven from a single AI agent conversation.
 ## Showcase
 
 <div align="center">
-<img src="media/AugmentHeroClone.PNG" alt="Augment Code Hero Recreation" width="700" style="border-radius: 8px;">
+<img src="https://raw.githubusercontent.com/vibheksoni/stealth-browser-mcp/master/media/AugmentHeroClone.PNG" alt="Augment Code Hero Recreation" width="700" style="border-radius: 8px;">
 </div>
 
 **Augment Code hero clone** - A user asked Claude to clone the hero section from [augmentcode.com](https://www.augmentcode.com/). The agent spawned a stealth browser, navigated to the site, extracted the complete element via CDP (styles, structure, assets), and generated a pixel-accurate HTML recreation with responsive design and animations. The entire process took under two minutes of conversation.
 
-[View the recreation](demo/augment-hero-recreation.html) | [Full walkthrough](demo/augment-hero-clone.md)
+[View the recreation](https://github.com/vibheksoni/stealth-browser-mcp/blob/master/demo/augment-hero-recreation.html) | [Full walkthrough](https://github.com/vibheksoni/stealth-browser-mcp/blob/master/demo/augment-hero-clone.md)
 
 ---
 
 ## Roadmap
 
-See the live plan in [ROADMAP.md](ROADMAP.md). Contributions welcome.
+See the live plan in [ROADMAP.md](https://github.com/vibheksoni/stealth-browser-mcp/blob/master/ROADMAP.md). Contributions welcome.
 
 ---
 
 ## Contributing
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) and open a PR. First-time contributors welcome.
+Read [CONTRIBUTING.md](https://github.com/vibheksoni/stealth-browser-mcp/blob/master/CONTRIBUTING.md) and open a PR. First-time contributors welcome.
 
 If this project saves you time, star the repo. It helps more than you think.
 
@@ -646,4 +646,4 @@ If this tool saved you time or made you money, consider supporting development:
 
 ## License
 
-MIT - see [LICENSE](LICENSE).
+MIT - see [LICENSE](https://github.com/vibheksoni/stealth-browser-mcp/blob/master/LICENSE).
