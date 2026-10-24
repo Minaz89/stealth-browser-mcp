@@ -77,3 +77,7 @@ Set `STEALTH_BROWSER_TESTS=1` to include tests that launch a real browser. Bench
 - Powerful browser-control tools are intentional primitives for trusted local MCP clients.
 - Do not expose secrets from `.mcp.json`, environment variables, browser profiles, cookies, or debug exports.
 - Redact proxy credentials and tokens in diagnostics, logs, and summaries.
+
+## Releasing
+
+Bump `__version__` in `src/stealth_browser_mcp/__init__.py`, then push a matching tag such as `v0.3.0`. The release workflow builds the sdist and wheel and publishes them to PyPI through trusted publishing in the `pypi` environment, which only accepts `v*` tags.
