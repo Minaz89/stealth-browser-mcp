@@ -10,8 +10,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import nodriver as uc
 
-import page_bindings as page_bindings_module
-from page_bindings import MAX_PAYLOAD_BYTES, PageBindingManager
+from stealth_browser_mcp import page_bindings as page_bindings_module
+from stealth_browser_mcp.page_bindings import MAX_PAYLOAD_BYTES, PageBindingManager
 
 
 class FakeTab:

@@ -6,7 +6,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-import platform_utils
+from stealth_browser_mcp import platform_utils
 
 
 def environment(system, root, container):

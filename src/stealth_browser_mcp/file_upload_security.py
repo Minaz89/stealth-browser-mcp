@@ -4,9 +4,9 @@ import os
 from pathlib import Path
 from typing import List, Optional, Sequence
 
+from .paths import default_upload_root
 
 FILE_UPLOAD_ALLOWED_DIRS_ENV = "BROWSER_FILE_UPLOAD_ALLOWED_DIRS"
-DEFAULT_FILE_UPLOAD_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _split_configured_roots(config_value: Optional[str]) -> Optional[List[str]]:
@@ -51,7 +51,7 @@ def get_allowed_upload_roots() -> List[Path]:
         List[Path]: Resolved directories that file_upload may read from.
     """
     configured_roots = _split_configured_roots(os.getenv(FILE_UPLOAD_ALLOWED_DIRS_ENV))
-    root_values = configured_roots if configured_roots is not None else [str(DEFAULT_FILE_UPLOAD_ROOT)]
+    root_values = configured_roots if configured_roots is not None else [str(default_upload_root())]
     return [_resolve_upload_root(root_value) for root_value in root_values]
 
 

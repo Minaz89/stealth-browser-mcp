@@ -98,9 +98,21 @@ Navigate Cloudflare challenges, anti-bot checks, and login walls with real Chrom
 
 ## Quickstart
 
-### 1. Clone and install
+### 1. Install
 
 Requires Python 3.10+ and Chrome, Chromium, or Microsoft Edge.
+
+**With pipx (recommended):**
+
+```bash
+pipx install git+https://github.com/vibheksoni/stealth-browser-mcp.git
+```
+
+This puts a `stealth-browser-mcp` command on your `PATH`. Upgrade with `pipx upgrade stealth-browser-mcp`, or pin a release by adding `@<tag>` to the URL. `uvx --from git+https://github.com/vibheksoni/stealth-browser-mcp.git stealth-browser-mcp` runs it without installing.
+
+The package is not on PyPI yet. `pipx install stealth-browser-mcp` without the GitHub URL installs a different, unrelated project that uses the same name.
+
+**From a clone (for development):**
 
 ```bash
 git clone https://github.com/vibheksoni/stealth-browser-mcp.git
@@ -118,7 +130,29 @@ pip install -r requirements.txt
 
 ### 2. Add to your MCP client
 
-**Claude Code CLI (recommended):**
+**Installed with pipx:**
+
+```bash
+claude mcp add stealth-browser-mcp -- stealth-browser-mcp
+```
+
+Or in any client's JSON config:
+
+```json
+{
+  "mcpServers": {
+    "stealth-browser-mcp": {
+      "command": "stealth-browser-mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}
+```
+
+If your client cannot find the command, use the full path printed by `pipx list`.
+
+**From a clone with Claude Code CLI:**
 
 Windows:
 
@@ -221,12 +255,14 @@ Choose exactly what functionality you need. Run the full 101-tool suite or strip
 | **Xpool safe** (`--xpool-safe`) | 84 | Disable CDP function tools that trigger `Runtime.enable` |
 
 ```bash
-python src/server.py --minimal
-python src/server.py --disable-cdp-functions --disable-dynamic-hooks
-python src/server.py --list-sections
-python src/server.py --debug
-python src/server.py --transport http --host 127.0.0.1 --port 8000
+stealth-browser-mcp --minimal
+stealth-browser-mcp --disable-cdp-functions --disable-dynamic-hooks
+stealth-browser-mcp --list-sections
+stealth-browser-mcp --debug
+stealth-browser-mcp --transport http --host 127.0.0.1 --port 8000
 ```
+
+From a clone, `python src/server.py` takes the same flags.
 
 Use `--debug` or set `STEALTH_BROWSER_DEBUG=1` to enable verbose server diagnostics on `stderr`. Normal MCP `stdio` runs stay quiet by default to avoid corrupting JSON-RPC transport output.
 
@@ -261,7 +297,8 @@ These are environment variables for the MCP server process. Set them in your she
 | `BROWSER_TAB_RECYCLE_NAVIGATIONS` | `0` | Replace the main tab with a fresh one after this many navigations. `0` keeps the same tab, which preserves history and session storage. |
 | `BROWSER_ORPHAN_PROFILE_MAX_AGE` | `21600` | Startup cleanup threshold in seconds for stale `uc_*` temp profiles. Set `0` to disable this startup sweep. |
 | `STEALTH_BROWSER_EXECUTABLE` | auto-detect | Path to the Chrome, Chromium, or Edge executable to launch instead of the auto-detected one. |
-| `BROWSER_FILE_UPLOAD_ALLOWED_DIRS` | repo root | Directories that `file_upload()` may read from. Separate multiple roots with `;` on Windows or `:` on macOS/Linux. |
+| `BROWSER_FILE_UPLOAD_ALLOWED_DIRS` | repo root or data dir | Directories that `file_upload()` may read from. Separate multiple roots with `;` on Windows or `:` on macOS/Linux. Defaults to the repo root for a clone and to the `uploads` folder in the data directory for an installed package. |
+| `STEALTH_BROWSER_MCP_DATA_DIR` | repo root or user data dir | Where element clones and large responses are written. Defaults to the repo root for a clone, and for an installed package to `%LOCALAPPDATA%\stealth-browser-mcp` on Windows, `~/Library/Application Support/stealth-browser-mcp` on macOS, or `$XDG_DATA_HOME/stealth-browser-mcp` (`~/.local/share/stealth-browser-mcp`) on Linux. |
 | `STEALTH_BROWSER_DEBUG` | `0` | Enable verbose debug logging to `stderr` when set to `1`. |
 | `DEBUG` | `0` | Legacy alias for `STEALTH_BROWSER_DEBUG`. |
 | `XPOOL_SAFE_MODE` | `0` | Disable the `cdp-functions` section at startup. |

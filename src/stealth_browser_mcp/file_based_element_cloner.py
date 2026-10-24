@@ -5,14 +5,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-try:
-    from .comprehensive_element_cloner import comprehensive_element_cloner
-    from .debug_logger import debug_logger
-    from .element_cloner import element_cloner
-except ImportError:
-    from comprehensive_element_cloner import comprehensive_element_cloner
-    from debug_logger import debug_logger
-    from element_cloner import element_cloner
+from .comprehensive_element_cloner import comprehensive_element_cloner
+from .debug_logger import debug_logger
+from .element_cloner import element_cloner
+from .paths import clone_output_dir
 
 
 class FileBasedElementCloner:
@@ -24,11 +20,12 @@ class FileBasedElementCloner:
 
         Args:
             output_dir (Optional[str]): Directory to save clone files.
-                Defaults to <project_root>/element_clones (absolute path,
-                avoids startup failures when the host process uses a read-only cwd).
+                Defaults to element_clones in the data directory, an absolute
+                path that avoids startup failures when the host process uses a
+                read-only cwd.
         """
         if output_dir is None:
-            self.output_dir = Path(__file__).resolve().parent.parent / "element_clones"
+            self.output_dir = clone_output_dir()
         else:
             self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)

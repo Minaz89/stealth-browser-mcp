@@ -16,7 +16,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import nodriver as uc
 
-from debug_logger import debug_logger
+from .debug_logger import debug_logger
 
 HOOK_FNMATCH = types.SimpleNamespace(fnmatch=fnmatch.fnmatch, fnmatchcase=fnmatch.fnmatchcase)
 

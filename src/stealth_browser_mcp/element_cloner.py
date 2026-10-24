@@ -4,20 +4,16 @@ import asyncio
 import json
 import re
 import time
-from pathlib import Path
+from importlib import resources
 from typing import Any, Dict, Optional
 from urllib.parse import urljoin, urlparse
 
 import requests
 
-try:
-    from .debug_logger import debug_logger
-    from .js_values import evaluate_to_python
-except ImportError:
-    from debug_logger import debug_logger
-    from js_values import evaluate_to_python
+from .debug_logger import debug_logger
+from .js_values import evaluate_to_python
 
-JS_DIR = Path(__file__).parent / "js"
+JS_DIR = resources.files(__package__) / "js"
 PLACEHOLDER_PATTERN = re.compile(r"\$([A-Z_]+)\$")
 
 
@@ -87,7 +83,7 @@ class ElementCloner:
             str: JavaScript source ready to evaluate.
         """
         js_file = JS_DIR / filename
-        if not js_file.exists():
+        if not js_file.is_file():
             raise FileNotFoundError(f"JavaScript file not found: {js_file}")
         js_code = js_file.read_text(encoding='utf-8')
         literals = {name.upper(): json.dumps(value) for name, value in values.items()}

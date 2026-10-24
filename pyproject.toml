@@ -1,6 +1,10 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
 [project]
 name = "stealth-browser-mcp"
-version = "0.2.5"
+dynamic = ["version"]
 description = "Ultimate undetectable browser automation MCP server with CDP-level access"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,10 +16,11 @@ authors = [
 # Runtime dependencies
 dependencies = [
     "fastmcp==2.11.2",
+    "mcp==1.30.0",
     "nodriver==0.47.0",
-    "pydantic==2.11.7",
+    "pydantic==2.12.5",
     "python-dotenv==1.1.1",
-    "py2js @ git+https://github.com/am230/py2js.git@31a83c7c25a51ab0cc3255f484a2279d26278ec3",
+    "py2js==1.2.1",
     "jsbeautifier==1.15.4",
     "strinpy==0.0.4",
     "strbuilder==1.1.3",
@@ -24,6 +29,9 @@ dependencies = [
     "requests==2.33.1",
     "uvicorn[standard]==0.35.0",
 ]
+
+[project.scripts]
+stealth-browser-mcp = "stealth_browser_mcp.server:main"
 
 # Development dependencies (optional)
 [project.optional-dependencies]
@@ -42,10 +50,19 @@ Documentation = "https://github.com/vibheksoni/stealth-browser-mcp#readme"
 Repository = "https://github.com/vibheksoni/stealth-browser-mcp.git"
 Issues = "https://github.com/vibheksoni/stealth-browser-mcp/issues"
 
+[tool.hatch.version]
+path = "src/stealth_browser_mcp/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stealth_browser_mcp"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "README.md", "LICENSE", "CHANGELOG.md", "requirements.txt"]
+
 # Code formatting
 [tool.black]
 line-length = 100
-target-version = ["py310", "py311", "py312", "py313"]
+target-version = ["py310", "py311", "py312", "py313", "py314"]
 
 [tool.isort]
 profile = "black"

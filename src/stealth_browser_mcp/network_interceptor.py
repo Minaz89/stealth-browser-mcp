@@ -11,9 +11,9 @@ from typing import Any, Coroutine, Dict, List, Optional, Set
 import nodriver as uc
 from nodriver import Tab
 
-import cdp_raw
-from debug_logger import debug_logger
-from models import NetworkRequest, NetworkResponse
+from . import cdp_raw
+from .debug_logger import debug_logger
+from .models import NetworkRequest, NetworkResponse
 
 MAX_REQUESTS_PER_INSTANCE = 1000
 MAX_CAPTURED_BODY_BYTES = 2 * 1024 * 1024

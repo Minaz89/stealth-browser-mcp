@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from nodriver import Tab, cdp
 
-from key_definitions import resolve_key_descriptor
+from .key_definitions import resolve_key_descriptor
 
 SHIFTED_SYMBOLS = set('~!@#$%^&*()_+{}|:"<>?')
 SHIFT_KEY = {"key": "Shift", "code": "ShiftLeft", "virtual_key_code": 16}

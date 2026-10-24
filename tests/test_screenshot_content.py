@@ -25,8 +25,8 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-import screenshot_encoder
-from screenshot_encoder import DEFAULT_QUALITY, fit_screenshot, validate_options
+from stealth_browser_mcp import screenshot_encoder
+from stealth_browser_mcp.screenshot_encoder import DEFAULT_QUALITY, fit_screenshot, validate_options
 
 
 class ScreenshotContentTests(unittest.TestCase):
@@ -43,7 +43,7 @@ class ScreenshotContentTests(unittest.TestCase):
     def server(self):
         # Load the exact production function without importing server.py's global
         # cleanup/browser objects. Registration and client serialization are real.
-        tree = ast.parse((ROOT / "src/server.py").read_text())
+        tree = ast.parse((ROOT / "src/stealth_browser_mcp/server.py").read_text())
         function = next(n for n in tree.body if isinstance(n, ast.AsyncFunctionDef)
                         and n.name == "take_screenshot")
         mcp = FastMCP("screenshot-wire-test")
@@ -70,7 +70,7 @@ class ScreenshotContentTests(unittest.TestCase):
             tempfile=tempfile, os=os, base64=base64, json=json, DEFAULT_QUALITY=DEFAULT_QUALITY,
             fit_screenshot=fit_screenshot, validate_screenshot_options=validate_options,
         )
-        exec(compile(ast.Module(body=[function], type_ignores=[]), str(ROOT / "src/server.py"), "exec"), namespace)
+        exec(compile(ast.Module(body=[function], type_ignores=[]), str(ROOT / "src/stealth_browser_mcp/server.py"), "exec"), namespace)
         return mcp
 
     def call(self, **kwargs):

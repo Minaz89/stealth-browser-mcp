@@ -7,8 +7,8 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-import network_interceptor as network_module
-from network_interceptor import NetworkInterceptor
+from stealth_browser_mcp import network_interceptor as network_module
+from stealth_browser_mcp.network_interceptor import NetworkInterceptor
 
 
 class FakeTab:
