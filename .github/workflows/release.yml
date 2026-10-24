@@ -30,7 +30,7 @@ jobs:
     timeout-minutes: 10
     environment:
       name: pypi
-      url: https://pypi.org/project/stealth-browser-mcp/
+      url: https://pypi.org/project/browserstealthmcp/
     permissions:
       id-token: write
     steps:
@@ -39,3 +39,5 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true

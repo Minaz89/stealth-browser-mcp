@@ -50,4 +50,5 @@ jobs:
         run: |
           pipx install --python "$(which python)" "$GITHUB_WORKSPACE"/dist/*.whl
           stealth-browser-mcp --list-sections
-          "$(pipx environment --value PIPX_LOCAL_VENVS)/stealth-browser-mcp/bin/python" -c "from stealth_browser_mcp import element_cloner, paths; assert paths.source_checkout_root() is None; assert (element_cloner.JS_DIR / 'extract_structure.js').is_file(); print(paths.clone_output_dir())"
+          browserstealthmcp --list-sections > /dev/null
+          "$(pipx environment --value PIPX_LOCAL_VENVS)/browserstealthmcp/bin/python" -c "from stealth_browser_mcp import element_cloner, paths; assert paths.source_checkout_root() is None; assert (element_cloner.JS_DIR / 'extract_structure.js').is_file(); print(paths.clone_output_dir())"

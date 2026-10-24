@@ -105,12 +105,12 @@ Requires Python 3.10+ and Chrome, Chromium, or Microsoft Edge.
 **With pipx (recommended):**
 
 ```bash
-pipx install git+https://github.com/vibheksoni/stealth-browser-mcp.git
+pipx install browserstealthmcp
 ```
 
-This puts a `stealth-browser-mcp` command on your `PATH`. Upgrade with `pipx upgrade stealth-browser-mcp`, or pin a release by adding `@<tag>` to the URL. `uvx --from git+https://github.com/vibheksoni/stealth-browser-mcp.git stealth-browser-mcp` runs it without installing.
+This puts a `stealth-browser-mcp` command on your `PATH`. Upgrade with `pipx upgrade browserstealthmcp`. `uvx browserstealthmcp` runs it without installing. To run the latest commit instead of a release, use `pipx install git+https://github.com/vibheksoni/stealth-browser-mcp.git`.
 
-The package is not on PyPI yet. `pipx install stealth-browser-mcp` without the GitHub URL installs a different, unrelated project that uses the same name.
+The PyPI package is named `browserstealthmcp` because `stealth-browser-mcp` on PyPI belongs to a different, unrelated project. `pipx install stealth-browser-mcp` installs that project, not this one.
 
 **From a clone (for development):**
 
@@ -150,7 +150,7 @@ Or in any client's JSON config:
 }
 ```
 
-If your client cannot find the command, use the full path printed by `pipx list`.
+If your client cannot find the command, use the full path printed by `pipx list`. With uv you can skip the install and use `"command": "uvx", "args": ["browserstealthmcp"]`.
 
 **From a clone with Claude Code CLI:**
 

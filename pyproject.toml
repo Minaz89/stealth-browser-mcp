@@ -3,7 +3,7 @@ requires = ["hatchling>=1.26"]
 build-backend = "hatchling.build"
 
 [project]
-name = "stealth-browser-mcp"
+name = "browserstealthmcp"
 dynamic = ["version"]
 description = "Ultimate undetectable browser automation MCP server with CDP-level access"
 readme = "README.md"
@@ -32,6 +32,7 @@ dependencies = [
 
 [project.scripts]
 stealth-browser-mcp = "stealth_browser_mcp.server:main"
+browserstealthmcp = "stealth_browser_mcp.server:main"
 
 # Development dependencies (optional)
 [project.optional-dependencies]
