@@ -20,10 +20,7 @@ from typing import Any, Dict, List
 
 import nodriver as uc
 
-try:
-    from .debug_logger import debug_logger
-except ImportError:
-    from debug_logger import debug_logger
+from .debug_logger import debug_logger
 
 
 class CDPElementCloner:

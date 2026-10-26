@@ -18,3 +18,37 @@ jobs:
 
       - name: Unit tests
         run: python -m unittest discover -s tests -v
+
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -U pip build
+      - name: Build sdist and wheel
+        run: python -m build
+      - name: Check wheel contents
+        run: |
+          python - <<'PY'
+          import glob, zipfile
+          names = zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist()
+          top = {name.split("/")[0] for name in names if not name.split("/")[0].endswith(".dist-info")}
+          assert top == {"stealth_browser_mcp"}, top
+          scripts = [name for name in names if name.startswith("stealth_browser_mcp/js/") and name.endswith(".js")]
+          assert len(scripts) >= 5, scripts
+          print(f"{len(names)} entries, {len(scripts)} js assets")
+          PY
+      - name: Install with pipx and run outside the checkout
+        working-directory: ${{ runner.temp }}
+        run: |
+          pipx install --python "$(which python)" "$GITHUB_WORKSPACE"/dist/*.whl
+          stealth-browser-mcp --list-sections
+          browserstealthmcp --list-sections > /dev/null
+          "$(pipx environment --value PIPX_LOCAL_VENVS)/browserstealthmcp/bin/python" -c "from stealth_browser_mcp import element_cloner, paths; assert paths.source_checkout_root() is None; assert (element_cloner.JS_DIR / 'extract_structure.js').is_file(); print(paths.clone_output_dir())"

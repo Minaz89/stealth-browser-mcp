@@ -10,14 +10,9 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
-try:
-    from .comprehensive_element_cloner import comprehensive_element_cloner
-    from .debug_logger import debug_logger
-    from .persistent_storage import persistent_storage
-except ImportError:
-    from comprehensive_element_cloner import comprehensive_element_cloner
-    from debug_logger import debug_logger
-    from persistent_storage import persistent_storage
+from .comprehensive_element_cloner import comprehensive_element_cloner
+from .debug_logger import debug_logger
+from .persistent_storage import persistent_storage
 
 MAX_STORED_ELEMENTS = 50
 STYLE_CATEGORIES = {

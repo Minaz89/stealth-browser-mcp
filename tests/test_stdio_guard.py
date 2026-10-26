@@ -6,8 +6,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from response_handler import ResponseHandler
-from stdio_guard import install_stdio_guard, is_guard_active, reset_stdio_guard_for_tests
+from stealth_browser_mcp.response_handler import ResponseHandler
+from stealth_browser_mcp.stdio_guard import install_stdio_guard, is_guard_active, reset_stdio_guard_for_tests
 
 
 class FakeStdout:

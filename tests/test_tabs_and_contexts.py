@@ -9,9 +9,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import nodriver as uc
 
-from browser_manager import BrowserManager
-from cdp_function_executor import CDPFunctionExecutor
-from models import BrowserOptions
+from stealth_browser_mcp.browser_manager import BrowserManager
+from stealth_browser_mcp.cdp_function_executor import CDPFunctionExecutor
+from stealth_browser_mcp.models import BrowserOptions
 
 
 class FakeTab:

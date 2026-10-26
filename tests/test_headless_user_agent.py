@@ -7,8 +7,8 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-import browser_manager as browser_manager_module
-from browser_manager import BrowserManager
+from stealth_browser_mcp import browser_manager as browser_manager_module
+from stealth_browser_mcp.browser_manager import BrowserManager
 
 HEADLESS_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

@@ -11,7 +11,7 @@ from struct import calcsize, error as struct_error, pack, unpack
 from typing import Optional
 from urllib.parse import unquote, urlparse
 
-from debug_logger import debug_logger
+from .debug_logger import debug_logger
 
 DROPPED_HEADERS = ("proxy-authorization:",)
 HOP_BY_HOP_HEADERS = ("connection:", "proxy-connection:", "keep-alive:")

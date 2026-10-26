@@ -8,7 +8,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from nodriver import cdp
 
-from js_values import evaluate_to_python, from_deep_serialized, to_python
+from stealth_browser_mcp.js_values import evaluate_to_python, from_deep_serialized, to_python
 
 
 DEEP_OBJECT = {

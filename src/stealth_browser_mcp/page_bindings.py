@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import nodriver as uc
 from nodriver import Tab
 
-from debug_logger import debug_logger
+from .debug_logger import debug_logger
 
 BINDING_NAME = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]{0,63}$")
 MAX_PAYLOAD_BYTES = 64 * 1024

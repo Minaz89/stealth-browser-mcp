@@ -9,10 +9,10 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from element_cloner import element_cloner
-from file_based_element_cloner import FileBasedElementCloner
-from progressive_element_cloner import MAX_STORED_ELEMENTS, progressive_element_cloner
-from response_handler import ResponseHandler
+from stealth_browser_mcp.element_cloner import element_cloner
+from stealth_browser_mcp.file_based_element_cloner import FileBasedElementCloner
+from stealth_browser_mcp.progressive_element_cloner import MAX_STORED_ELEMENTS, progressive_element_cloner
+from stealth_browser_mcp.response_handler import ResponseHandler
 
 
 SAMPLE_CLONE = {
@@ -82,7 +82,7 @@ class ProgressiveClonerTests(unittest.TestCase):
     def test_store_is_capped_to_newest_entries(self):
         saved = {}
         data = {f"elem_{i}": {"full_data": {}, "timestamp": float(i)} for i in range(MAX_STORED_ELEMENTS + 5)}
-        with mock.patch("progressive_element_cloner.persistent_storage.set", side_effect=lambda key, value: saved.update(value)):
+        with mock.patch("stealth_browser_mcp.progressive_element_cloner.persistent_storage.set", side_effect=lambda key, value: saved.update(value)):
             progressive_element_cloner._save_store(data)
         self.assertEqual(len(saved), MAX_STORED_ELEMENTS)
         self.assertNotIn("elem_0", saved)
@@ -97,14 +97,14 @@ class FileBasedClonerTests(unittest.TestCase):
 
     def test_extraction_error_is_not_saved(self):
         error = {"error": "JavaScript error: boom"}
-        with mock.patch("file_based_element_cloner.element_cloner.extract_element_structure", mock.AsyncMock(return_value=error)):
+        with mock.patch("stealth_browser_mcp.file_based_element_cloner.element_cloner.extract_element_structure", mock.AsyncMock(return_value=error)):
             result = asyncio.run(self.cloner.extract_element_structure_to_file(object(), selector="#x"))
         self.assertEqual(result, error)
         self.assertEqual(list(Path(self.tmp.name).iterdir()), [])
 
     def test_complete_summary_reads_nested_element(self):
         with mock.patch(
-            "file_based_element_cloner.comprehensive_element_cloner.extract_complete_element",
+            "stealth_browser_mcp.file_based_element_cloner.comprehensive_element_cloner.extract_complete_element",
             mock.AsyncMock(return_value=json.loads(json.dumps(SAMPLE_CLONE))),
         ):
             result = asyncio.run(self.cloner.extract_complete_element_to_file(object(), "#go"))
@@ -117,7 +117,7 @@ class FileBasedClonerTests(unittest.TestCase):
 
     def test_styles_summary_keeps_components_key(self):
         styles = {"computed_styles": {"color": "red"}, "css_rules": []}
-        with mock.patch("file_based_element_cloner.element_cloner.extract_element_styles", mock.AsyncMock(return_value=styles)):
+        with mock.patch("stealth_browser_mcp.file_based_element_cloner.element_cloner.extract_element_styles", mock.AsyncMock(return_value=styles)):
             result = asyncio.run(self.cloner.extract_element_styles_to_file(object(), "#go"))
         self.assertEqual(result["components"]["computed_styles_count"], 1)
 

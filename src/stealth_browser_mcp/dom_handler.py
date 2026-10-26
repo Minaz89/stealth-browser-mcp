@@ -8,12 +8,12 @@ from typing import Any, Dict, List, Optional
 
 from nodriver import Tab
 
-import input_actions
-from debug_logger import debug_logger
-from file_upload_security import validate_upload_paths
-from js_values import evaluate_to_python
-from key_definitions import MODIFIER_SHIFT, resolve_key_descriptor, resolve_modifiers
-from models import ElementInfo
+from . import input_actions
+from .debug_logger import debug_logger
+from .file_upload_security import validate_upload_paths
+from .js_values import evaluate_to_python
+from .key_definitions import MODIFIER_SHIFT, resolve_key_descriptor, resolve_modifiers
+from .models import ElementInfo
 
 DEFAULT_ELEMENT_TIMEOUT = 10.0
 WAIT_POLL_INTERVAL = 0.1
