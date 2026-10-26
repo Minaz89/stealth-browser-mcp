@@ -15,10 +15,10 @@ if str(SRC_DIR) not in sys.path:
 import nodriver as uc
 import psutil
 
-from browser_manager import BrowserManager
-from dom_handler import DOMHandler
-from js_values import evaluate_to_python
-from models import BrowserOptions
+from stealth_browser_mcp.browser_manager import BrowserManager
+from stealth_browser_mcp.dom_handler import DOMHandler
+from stealth_browser_mcp.js_values import evaluate_to_python
+from stealth_browser_mcp.models import BrowserOptions
 
 from .environment import base_environment, runner_label
 from .local_server import LocalPageServer

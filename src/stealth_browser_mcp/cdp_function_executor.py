@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 import nodriver as uc
 from nodriver import Tab
 
-from debug_logger import debug_logger
+from .debug_logger import debug_logger
 
 CONTEXT_COLLECT_SECONDS = 0.3
 JS_IDENTIFIER = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]{0,63}$")

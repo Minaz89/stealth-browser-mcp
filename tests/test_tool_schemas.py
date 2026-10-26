@@ -8,7 +8,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from fastmcp import Client
 
-import server
+from stealth_browser_mcp import server
 
 # Tool parameters that default to None and must therefore accept an explicit null.
 NULL_DEFAULT_PARAMS = {

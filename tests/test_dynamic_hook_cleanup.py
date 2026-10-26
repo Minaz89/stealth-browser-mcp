@@ -8,7 +8,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import nodriver as uc
 
-from dynamic_hook_system import DynamicHookSystem
+from stealth_browser_mcp.dynamic_hook_system import DynamicHookSystem
 
 
 class FakeTab:

@@ -9,8 +9,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import nodriver as uc
 
-from browser_manager import BrowserManager
-from models import PageState
+from stealth_browser_mcp.browser_manager import BrowserManager
+from stealth_browser_mcp.models import PageState
 
 RUN_BROWSER_TESTS = os.getenv("STEALTH_BROWSER_TESTS", "").strip().lower() in {
     "1",
@@ -151,7 +151,7 @@ class GetPageStateTests(unittest.TestCase):
 )
 class GetPageStateBrowserTests(unittest.TestCase):
     def test_real_page_state(self):
-        from models import BrowserOptions
+        from stealth_browser_mcp.models import BrowserOptions
 
         async def run():
             manager = BrowserManager()

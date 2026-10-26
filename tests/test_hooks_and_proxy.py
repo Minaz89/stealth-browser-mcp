@@ -6,13 +6,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from cdp_function_executor import CDPFunctionExecutor
-from debug_logger import DebugLogger
-from dynamic_hook_ai_interface import dynamic_hook_ai
-from dynamic_hook_system import DynamicHook, RequestInfo, dynamic_hook_system
-from http_security import EnvironmentBearerTokenVerifier
-from proxy_forwarder import AuthenticatedProxyForwarder
-from proxy_utils import ProxyConfigError, parse_proxy_config
+from stealth_browser_mcp.cdp_function_executor import CDPFunctionExecutor
+from stealth_browser_mcp.debug_logger import DebugLogger
+from stealth_browser_mcp.dynamic_hook_ai_interface import dynamic_hook_ai
+from stealth_browser_mcp.dynamic_hook_system import DynamicHook, RequestInfo, dynamic_hook_system
+from stealth_browser_mcp.http_security import EnvironmentBearerTokenVerifier
+from stealth_browser_mcp.proxy_forwarder import AuthenticatedProxyForwarder
+from stealth_browser_mcp.proxy_utils import ProxyConfigError, parse_proxy_config
 
 BLOCK_CODE = 'def process_request(request):\n    return HookAction(action="block")\n'
 

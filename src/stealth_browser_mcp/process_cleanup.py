@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, Optional, Set, TypeVar
 
 import psutil
 
-from debug_logger import debug_logger
+from .debug_logger import debug_logger
 
 F = TypeVar("F", bound=Callable[..., Any])
 

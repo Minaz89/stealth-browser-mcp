@@ -28,7 +28,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-3. Run the server: `python src/server.py`
+3. Run the server: `python src/server.py`. Code lives in the `stealth_browser_mcp` package under `src/stealth_browser_mcp/`, and `pip install -e .` also gives you the `stealth-browser-mcp` command.
 4. Run the tests: `python -m unittest discover -s tests -v`. Set `STEALTH_BROWSER_TESTS=1` to include tests that launch a real browser.
 5. If your change can affect detection, run the stealth benchmark before and after: `python -m benchmarks.stealth run --mode headed`. See [STEALTH_TESTS.md](STEALTH_TESTS.md) for targets and statuses.
 

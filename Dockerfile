@@ -1,14 +1,13 @@
 # Use Python 3.11 slim image for smaller size
 FROM python:3.11-slim
 
-# Install system dependencies for Chrome, browser automation, and git (needed for py2js)
+# Install system dependencies for Chrome and browser automation
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
     unzip \
     curl \
     xvfb \
-    git \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from .paths import clone_output_dir
+
 UNSAFE_FILENAME_CHARS = re.compile(r"[^\w.-]+")
 MAX_PREFIX_LENGTH = 80
 
@@ -24,7 +26,7 @@ class ResponseHandler:
         """
         self.max_tokens = max_tokens
         if clone_dir is None:
-            self.clone_dir = Path(__file__).resolve().parent.parent / "element_clones"
+            self.clone_dir = clone_output_dir()
         else:
             self.clone_dir = Path(clone_dir)
         self.clone_dir.mkdir(parents=True, exist_ok=True)

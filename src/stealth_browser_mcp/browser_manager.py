@@ -11,16 +11,16 @@ from datetime import datetime
 import nodriver as uc
 from nodriver import Browser, Tab
 
-import cdp_raw
-from browser_launcher import launch_browser
-from debug_logger import debug_logger
-from models import BrowserInstance, BrowserState, BrowserOptions, PageState
-from persistent_storage import persistent_storage
-from dynamic_hook_system import dynamic_hook_system
-from platform_utils import get_platform_info, check_browser_executable, merge_browser_args
-from process_cleanup import process_cleanup
-from proxy_forwarder import AuthenticatedProxyForwarder
-from proxy_utils import (
+from . import cdp_raw
+from .browser_launcher import launch_browser
+from .debug_logger import debug_logger
+from .models import BrowserInstance, BrowserState, BrowserOptions, PageState
+from .persistent_storage import persistent_storage
+from .dynamic_hook_system import dynamic_hook_system
+from .platform_utils import get_platform_info, check_browser_executable, merge_browser_args
+from .process_cleanup import process_cleanup
+from .proxy_forwarder import AuthenticatedProxyForwarder
+from .proxy_utils import (
     ProxyConfig,
     ProxyConfigError,
     merge_proxy_server_arg,

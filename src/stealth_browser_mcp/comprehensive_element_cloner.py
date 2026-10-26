@@ -19,12 +19,8 @@ import json
 import time
 from typing import Any, Dict
 
-try:
-    from .debug_logger import debug_logger
-    from .js_values import evaluate_to_python
-except ImportError:
-    from debug_logger import debug_logger
-    from js_values import evaluate_to_python
+from .debug_logger import debug_logger
+from .js_values import evaluate_to_python
 
 
 class ComprehensiveElementCloner:

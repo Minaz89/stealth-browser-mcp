@@ -8,8 +8,8 @@ from urllib.parse import quote
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from dom_handler import DOMHandler
-from key_definitions import (
+from stealth_browser_mcp.dom_handler import DOMHandler
+from stealth_browser_mcp.key_definitions import (
     MODIFIER_ALT,
     MODIFIER_CONTROL,
     MODIFIER_META,
@@ -217,8 +217,8 @@ class PressKeyDispatchTests(unittest.IsolatedAsyncioTestCase):
 )
 class PressKeyBrowserTests(unittest.IsolatedAsyncioTestCase):
     async def test_dispatched_events_are_trusted(self):
-        from browser_manager import BrowserManager
-        from models import BrowserOptions
+        from stealth_browser_mcp.browser_manager import BrowserManager
+        from stealth_browser_mcp.models import BrowserOptions
 
         manager = BrowserManager()
         instance = await manager.spawn_browser(

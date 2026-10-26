@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import nodriver as uc
 
-import input_actions
+from stealth_browser_mcp import input_actions
 
 
 class RecordingTab:

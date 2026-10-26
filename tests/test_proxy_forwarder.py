@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from proxy_forwarder import AuthenticatedProxyForwarder
+from stealth_browser_mcp.proxy_forwarder import AuthenticatedProxyForwarder
 
 RESPONSE = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
 
